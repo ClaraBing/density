@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import torch.distributions as tdist
 
 # local imports
-from rbig_util import *
+from utils.rbig_util import *
 import args
 from data.get_loader import *
 
