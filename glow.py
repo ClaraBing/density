@@ -177,9 +177,10 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, layer_type, in_ch
 
   # Save samples and data
   images = sample(net, layer_type, num_samples, device, in_channels)
-  os.makedirs(os.path.join('samples', args.dataset), exist_ok=True)
+  out_dir = os.path.join('samples', args.dataset)
+  os.makedirs(out_dir, exist_ok=True)
   images_concat = torchvision.utils.make_grid(images, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
-  torchvision.utils.save_image(images_concat, 'samples/epoch_{}.png'.format(epoch))
+  torchvision.utils.save_image(images_concat, os.path.join(out_dir, 'epoch_{}.png'.format(epoch)))
 
 
 if __name__ == '__main__':
