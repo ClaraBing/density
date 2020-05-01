@@ -16,7 +16,7 @@ class BaseArgs:
     self.parser = argparse.ArgumentParser()
     self.parser.add_argument('--mode', type=str, choices=['train', 'test'])
     # Model
-    self.parser.add_argument('--model', type=str, default='glow', choices=['glow'])
+    self.parser.add_argument('--model', type=str, default='glow', choices=['glow', 'rbig'])
     # -- Glow
     self.parser.add_argument('--in-channels', type=int, help='Number of channels in input layer')
     self.parser.add_argument('--mid-channels', default=512, type=int, help='Number of channels in hidden layers')
@@ -30,7 +30,7 @@ class BaseArgs:
                              help="Rotation type for RBIG.")
     # Data
     self.parser.add_argument('--dataset', type=str, choices=['cifar10', 'MNIST', 'FashionMNIST',
-                             'GaussianLine', 'GaussianMixture'])
+                             'GaussianLine', 'GaussianMixture', 'uniform'])
     self.parser.add_argument('--num-workers', type=int, default=4)
     self.parser.add_argument('--bt', default=64, type=int, help='Batch size')
     self.parser.add_argument('--dlen', default=1, type=int, 

@@ -15,7 +15,7 @@ class TrainArgs(BaseArgs):
     self.parser.add_argument('--wd', default=1e-5, type=float, help="Weight decay.")
     self.parser.add_argument('--use-val', type=int, help="Whether to use a val set during training.")
     self.parser.add_argument('--max_grad_norm', type=float, default=-1., help='Max gradient norm for clipping')
-    self.parser.add_argument('--num_epochs', default=100, type=int, help='Number of epochs to train')
-    self.parser.add_argument('--num_samples', default=64, type=int, help='Number of samples at test time')
+    self.parser.add_argument('--num-epochs', default=100, type=int, help='Number of epochs to train')
+    self.parser.add_argument('--num-samples', default=64, type=int, help='Number of samples at test time')
    
 
