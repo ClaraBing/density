@@ -1,13 +1,14 @@
 #!/bin/bash
 
-# dataset='GaussianLine'
-dataset='GaussianMixture'
+dataset='GaussianLine'
+# dataset='GaussianMixture'
+# dataset='uniform'
 
-CUDA_VISIBLE_DEVICES=0 python -W ignore rbig.py \
+CUDA_VISIBLE_DEVICES=3 python -W ignore rbig.py \
+  --model='rbig' \
   --dataset=$dataset \
   --use-val=1 \
-  --d=2 \
+  --d=32 \
   --dlen=50000 \
-  --bt=100 \
-  --n-layer=5 \
-  --rotation-type='random'
+  --bt=2000 \
+  --rotation-type='PCA'

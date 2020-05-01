@@ -2,7 +2,6 @@
 
 Train script adapted from: https://github.com/kuangliu/pytorch-cifar/
 """
-import argparse
 import numpy as np
 import os
 import random
@@ -15,15 +14,13 @@ import torchvision
 import torchvision.transforms as transforms
 
 import args
-import glow.util as util
-# from data_loader import get_loader
+import util
+from models import Glow
 from data.get_loader import get_loader
-from glow.models import Glow
 
 from tqdm import tqdm
 
 import pdb
-
 
 def str2bool(s):
     return s.lower().startswith('t')
@@ -121,7 +118,7 @@ def train(epoch, net, trainloader, device, optimizer, scheduler, loss_fn, max_gr
       progress_bar.update(x.size(0))
       global_step += x.size(0)
 
-      if bi % 50 == 0:
+      if bi % 100 == 0:
         wandb.log({
           'loss': loss,
         })
@@ -181,7 +178,6 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, layer_type, in_ch
   os.makedirs(out_dir, exist_ok=True)
   images_concat = torchvision.utils.make_grid(images, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
   torchvision.utils.save_image(images_concat, os.path.join(out_dir, 'epoch_{}.png'.format(epoch)))
-
 
 if __name__ == '__main__':
     best_loss = 0
