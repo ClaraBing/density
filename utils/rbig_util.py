@@ -7,7 +7,11 @@ import torchvision
 import torch.nn.functional as F
 import torch.distributions as tdist
 
+from .vis_samples import plot_samples
+
 import pdb
+
+SILENT = True
 
 # set random seed
 torch.manual_seed(1234)
@@ -21,11 +25,15 @@ device = 'cuda'
 
 normal_distribution = tdist.Normal(0, 1)
 
+def one_D_gaussianization():
+    pass
 
 def generate_bandwidth(datapoints):
     total_datapoints = datapoints.shape[0]
-    bandwidth = torch.std(datapoints, dim=0, keepdim=True) * (
-                4. * np.sqrt(math.pi) / ((math.pi ** 4) * total_datapoints)) ** (0.2)
+    # scale ~ 0.13
+    scale = (4. * np.sqrt(math.pi) / ((math.pi ** 4) * total_datapoints)) ** (0.2)
+    bandwidth = torch.std(datapoints, dim=0, keepdim=True) * scale
+    pdb.set_trace()
     return bandwidth
 
 
@@ -124,6 +132,10 @@ def close(a, b, rtol=1e-5, atol=1e-4):
 
 # compute inverse normal CDF
 def logistic_inverse_normal_cdf(x, bandwidth, datapoints):
+    if x.dtype != bandwidth.dtype:
+      bandwidth = bandwidth.type(x.dtype)
+    if x.dtype != datapoints.dtype:
+      datapoints = datapoints.type(x.dtype)
     mask_bound = 0.5e-7
     cdf_l = logistic_kernel_cdf(x, datapoints, h=bandwidth)
     log_cdf_l = logistic_kernel_log_cdf(x, datapoints, h=bandwidth)  # log(CDF)
@@ -178,26 +190,32 @@ def invert_bisection_combo(x, rotation_matrix, datapoints, bandwidth, verbose=Fa
 
 def sampling(rotation_matrices, data_anchors, bandwidths, image_name='RBIG_samples.png',
              sample_num=100, d=None, channel=None, image_size=28, process_size=10):
-    print("Start sampling")
+    if not SILENT:
+      print("Start sampling")
     if d is not None:
       x = torch.randn(sample_num, d).float().to(device)
     elif channel is not None:
       x = torch.randn(sample_num, channel * image_size * image_size).float().to(device)
+
     for i in range(sample_num // process_size):
         for l in range(len(rotation_matrices) - 1, -1, -1):
-            print("Sampling layer {}".format(l))
+            if not SILENT:
+              print("Sampling layer {}".format(l))
             x[i * process_size: (i + 1) * process_size, :] = invert_bisection_combo(
                     x[i * process_size: (i + 1) * process_size, :], rotation_matrices[l], data_anchors[l].to(device),
                     bandwidths[l])
 
         x[i * process_size: (i + 1) * process_size, :] = sigmoid_transform(
             x[i * process_size: (i + 1) * process_size, :])
+
     if d is not None:
-      x = x.reshape(sample_num, d)
+      x = x.detach().cpu().numpy()
+      # pdb.set_trace()
+      plot_samples(x, title=image_name)
     elif channel is not None:
       x = x.reshape(sample_num, channel, image_size, image_size)
-    images_concat = torchvision.utils.make_grid(x, nrow=int(sample_num ** 0.5), padding=2, pad_value=255)
-    torchvision.utils.save_image(images_concat, image_name)
+      images_concat = torchvision.utils.make_grid(x, nrow=int(sample_num ** 0.5), padding=2, pad_value=255)
+      torchvision.utils.save_image(images_concat, image_name)
 
 def generate_orthogonal_matrix(data_anchor, rot_type="PCA", verbose=False):
     if verbose:
@@ -214,6 +232,7 @@ def generate_orthogonal_matrix(data_anchor, rot_type="PCA", verbose=False):
     elif rot_type == 'ICA':
       # NOTE: FastICA is extremely slow for high dim data and may not converge.
       cov = torch.mm(data_anchor.permute(1, 0), data_anchor)
+      cov /= len(data_anchor)
       cnt = 0
       n_tries = 20
       while cnt < n_tries:
