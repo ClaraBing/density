@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.glow.act_norm import ActNorm
-from models.glow.coupling import Coupling
-from models.glow.inv_conv import InvConv
+from .act_norm import ActNorm
+from .coupling import Coupling
+from .inv_conv import InvConv
 
 import pdb
 

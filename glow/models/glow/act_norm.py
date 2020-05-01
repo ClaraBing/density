@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from util import mean_dim
+from glow.util import mean_dim
 
 import pdb
 

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.glow.act_norm import ActNorm
+from glow.models.glow.act_norm import ActNorm
 
 import pdb
 
