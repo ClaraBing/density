@@ -9,7 +9,7 @@ def get_loader(args, is_train):
 
   if args.dataset == 'cifar10':
     dset = get_cifar(is_train)
-  elif args.dataset in ['2Dline', '16line']:
+  elif args.dataset in ['2dline', '16dline']:
     dset = GaussianLine(args.fdata)
   else:
     print('args.dataset:', args.dataset)

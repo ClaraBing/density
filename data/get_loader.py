@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import torch
 import torch.utils.data as data
@@ -6,6 +7,7 @@ from torchvision import transforms
 from torchvision.datasets import MNIST, FashionMNIST
 from .dataset_line import GaussianLine
 from .dataset_mixture import GaussianMixture
+from .dataset_uniform import Uniform
 
 import pdb
 
@@ -20,6 +22,8 @@ def get_loader(args, is_train):
     dset = GaussianLine(args.d, bt=args.bt, dlen=args.dlen, xdir=xdir)
   elif dataset == 'GaussianMixture':
     dset = GaussianMixture(dlen=args.dlen)
+  elif dataset == 'uniform':
+    dset = Uniform(dlen=args.dlen)
   elif dataset == 'MNIST':
     channel = 1
     image_size = 28
