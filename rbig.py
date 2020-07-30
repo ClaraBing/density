@@ -193,7 +193,7 @@ if __name__ == '__main__':
     best_60 = sorted(losses)[:60]
     losses = np.array(best_60)
     print('\nType:', args.rotation_type)
-    print('d={} / n_layer={}'.format(args.d, args.n_layer))
+    print('n_layer={}'.format(args.n_layer))
     print('Loss: mean={} / std={}'.format(losses.mean(), losses.std()))
 
     means += losses.mean(),

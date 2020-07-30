@@ -33,7 +33,6 @@ def generate_bandwidth(datapoints):
     # scale ~ 0.13
     scale = (4. * np.sqrt(math.pi) / ((math.pi ** 4) * total_datapoints)) ** (0.2)
     bandwidth = torch.std(datapoints, dim=0, keepdim=True) * scale
-    pdb.set_trace()
     return bandwidth
 
 
