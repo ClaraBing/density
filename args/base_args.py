@@ -30,6 +30,7 @@ class BaseArgs:
                              help="Rotation type for RBIG.")
     # Data
     self.parser.add_argument('--dataset', type=str, choices=['cifar10', 'MNIST', 'FashionMNIST',
+                             'GAS16', 'GAS128',
                              'GaussianLine', 'GaussianMixture', 'uniform'])
     self.parser.add_argument('--num-workers', type=int, default=4)
     self.parser.add_argument('--bt', default=64, type=int, help='Batch size')
@@ -40,6 +41,8 @@ class BaseArgs:
     self.parser.add_argument('--fxdir', type=str, default='',
                              help="File path to a pre-stored direction; used for GaussianLine.")
     self.parser.add_argument('--fdata', type=str, help="Path to data file.")
+    self.parser.add_argument('--norm-by-col', type=int, default=0,
+                             help="Whether to normalize each data column by its std.")
     # Misc
     self.parser.add_argument('--gpu_ids', default=[0], type=eval, help='IDs of GPUs to use')
     self.parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
