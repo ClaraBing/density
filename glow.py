@@ -2,6 +2,8 @@
 
 Train script adapted from: https://github.com/kuangliu/pytorch-cifar/
 """
+import pdb
+
 import numpy as np
 import os
 import random
@@ -14,13 +16,11 @@ import torchvision
 import torchvision.transforms as transforms
 
 import args
-import util
+import utils
 from models import Glow
 from data.get_loader import get_loader
 
 from tqdm import tqdm
-
-import pdb
 
 def str2bool(s):
     return s.lower().startswith('t')
@@ -75,7 +75,7 @@ def main():
           start_epoch = checkpoint['epoch']
           global_step = start_epoch * len(trainset)
   
-      loss_fn = util.NLLLoss().to(device)
+      loss_fn = utils.NLLLoss().to(device)
       if args.optim == 'Adam':
         optimizer = optim.Adam(net.parameters(), lr=args.lr)
       elif args.optim == 'SGD':
@@ -96,7 +96,7 @@ def train(epoch, net, trainloader, device, optimizer, scheduler, loss_fn, max_gr
   global global_step
   print('\nEpoch: %d' % epoch)
   net.train()
-  loss_meter = util.AverageMeter()
+  loss_meter = utils.AverageMeter()
   with tqdm(total=len(trainloader.dataset)) as progress_bar:
     for bi, x in enumerate(trainloader):
       if type(x) is tuple or type(x) is list:
@@ -108,12 +108,12 @@ def train(epoch, net, trainloader, device, optimizer, scheduler, loss_fn, max_gr
       loss_meter.update(loss.item(), x.size(0))
       loss.backward()
       if max_grad_norm > 0:
-          util.clip_grad_norm(optimizer, max_grad_norm)
+          utils.clip_grad_norm(optimizer, max_grad_norm)
       optimizer.step()
       scheduler.step(global_step)
 
       progress_bar.set_postfix(nll=loss_meter.avg,
-                               bpd=util.bits_per_dim(x, loss_meter.avg),
+                               bpd=utils.bits_per_dim(x, loss_meter.avg),
                                lr=optimizer.param_groups[0]['lr'])
       progress_bar.update(x.size(0))
       global_step += x.size(0)
@@ -147,7 +147,7 @@ def sample(net, layer_type, batch_size, device, in_channels=16):
 def test(epoch, net, testloader, device, loss_fn, num_samples, layer_type, in_channels=16):
   global best_loss
   net.eval()
-  loss_meter = util.AverageMeter()
+  loss_meter = utils.AverageMeter()
   with tqdm(total=len(testloader.dataset)) as progress_bar:
     for x in testloader:
       if type(x) is tuple or type(x) is list:
@@ -157,7 +157,7 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, layer_type, in_ch
       loss = loss_fn(z, sldj)
       loss_meter.update(loss.item(), x.size(0))
       progress_bar.set_postfix(nll=loss_meter.avg,
-                               bpd=util.bits_per_dim(x, loss_meter.avg))
+                               bpd=utils.bits_per_dim(x, loss_meter.avg))
       progress_bar.update(x.size(0))
 
   # Save checkpoint
@@ -174,7 +174,7 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, layer_type, in_ch
 
   # Save samples and data
   images = sample(net, layer_type, num_samples, device, in_channels)
-  out_dir = os.path.join('samples', args.dataset)
+  out_dir = os.path.join('samples', args.dataset+'_glow')
   os.makedirs(out_dir, exist_ok=True)
   images_concat = torchvision.utils.make_grid(images, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
   torchvision.utils.save_image(images_concat, os.path.join(out_dir, 'epoch_{}.png'.format(epoch)))

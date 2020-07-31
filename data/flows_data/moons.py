@@ -3,7 +3,7 @@ import numpy as np
 from sklearn import datasets as ds
 
 import datasets
-import datasets.util
+from . import util
 
 
 class MOONS:

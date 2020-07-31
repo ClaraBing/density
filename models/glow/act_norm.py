@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 
-from util import mean_dim
-
+# from util import mean_dim
+from utils.array_util import mean_dim
 import pdb
 
 class ActNorm(nn.Module):

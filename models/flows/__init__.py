@@ -1,1 +1,1 @@
-import .flows import *
+from flows import *

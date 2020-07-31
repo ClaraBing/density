@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import datasets
-import datasets.util
+from . import util
 
 
 class POWER:
