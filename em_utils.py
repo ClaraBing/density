@@ -7,7 +7,7 @@ from data.dataset_mixture import GaussianMixture
 
 import pdb
 
-VERBOSE = False
+VERBOSE = 1
 
 def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_mode='GA'):
   N, D = X.shape
@@ -23,7 +23,7 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_
     # prior - uniform
     pi = np.ones([D, K]) / K
     # GM means
-    mu = np.zeros([D, K])
+    mu = np.array([np.arange(-2, 2, 4/K) for _ in range(D)])
     # GM variances
     sigma_sqr = np.ones([D, K])
   
@@ -49,13 +49,33 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_
             exponents[:, d, k] = diff_square[:, d, k] / sigma_sqr[d,k]
             w[:, d, k] = pi[d,k] * np.exp(-0.5*exponents[:, d, k])
           else:
+            print('sigma_sqr[{}, {}] = 0.'.format(d, k))
+            pdb.set_trace()
             w[:, d, k] = 0
-        row_sum = w[:, d].sum(-1).reshape(-1, 1)
-        row_sum[row_sum==0] = 1 # avoid divide-by-zero
-        w[:, d] /= row_sum
+        Ksum = w[:, d].sum(-1)
+        # row_sum[row_sum==0] = 1 # avoid divide-by-zero
+        mask_good = np.abs(Ksum) > 1e-3
+        mask_bad = np.abs(Ksum) <= 1e-3
+        w[:, d][mask_good] /= Ksum[mask_good].reshape(-1,1)
+        w[:, d][mask_bad] = 1/K
       w_sumN = w.sum(0)
       w_sumNK = w_sumN.sum(-1)
       return Y, w, w_sumN, w_sumNK, diff_square, exponents
+
+    def update_pi_mu_sigma():
+      for d in range(D):
+        cur_y = Y[d]
+        for k in range(K):
+          pi[d,k] = w_sumN[d,k] / w_sumNK[d]
+          if w_sumN[d, k] != 0:
+            mu[d,k] = w[:, d, k].dot(Y[d]) / w_sumN[d,k]
+            diff_square[:, d, k] = (cur_y - mu[d,k])**2 
+            sigma_sqr[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / w_sumN[d,k]
+          else:
+            print('w_sumN[{}, {}] = 0.'.format(d, k))
+            pdb.set_trace()
+            mu[d,k] = 0
+            sigma_sqr[d,k] = 1
 
     Y, w, w_sumN, w_sumNK, diff_square, exponents = E()
 
@@ -67,17 +87,7 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_
         if True: # TODO: should I update w per GD step?
           Y, w, w_sumN, w_sumNK, diff_square, exponents = E()
 
-        for d in range(D):
-          cur_y = Y[d]
-          for k in range(K):
-            pi[d,k] = w_sumN[d,k] / w_sumNK[d]
-            if w_sumN[d, k] != 0:
-              mu[d,k] = w[:, d, k].dot(Y[d]) / w_sumN[d,k]
-              diff_square[:, d, k] = (cur_y - mu[d,k])**2 
-              sigma_sqr[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / w_sumN[d,k]
-            else:
-              mu[d,k] = 0
-              sigma_sqr[d,k] = 1
+        update_pi_mu_sigma()
 
         B = np.zeros([D, D])
         weights = w * exponents
@@ -91,6 +101,8 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_
         A += gamma * (np.linalg.inv(A).T + B)
 
     elif A_mode == 'CF': # closed form
+      update_pi_mu_sigma()
+
       if VERBOSE: print(A.reshape(-1))
       det = np.linalg.det(A)
       if np.abs(det) > 0.05:
@@ -105,11 +117,11 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_
       new_A = np.zeros_like(A)
       weights = w / sigma_sqr
       for i in range(D):
-        common_sums = A[i].reshape(-1, 1) * X.T
+        common_sums = A[i].reshape(-1, 1) * X.T # D x N
         total_sum = common_sums.sum(0)
         for j in range(D):
           j_common_sum = total_sum - common_sums[j]
-          cof_common_term = A[i].dot(cofs[i]) - A[i,j]*cofs[i,j]
+          cof_sum = A[i].dot(cofs[i]) - A[i,j]*cofs[i,j]
 
           c1, c2a, c2b, c3 = 0, 0, 0, 0
           for k in range(K):
@@ -121,11 +133,8 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_
             c3 += t2
 
           c1 *= cofs[i, j]
-          c2a *= cofs[i, j]
-          c2b *= cof_common_term
-          c2 = c2a + c2b
-          c3 *= cof_common_term
-          c3 -= N*cofs[i,j]
+          c2 = cofs[i,j] * c2a + cof_sum * c2b
+          c3 = cof_sum * c3 - N*cofs[i,j]
           
           tmp = np.sqrt(c2**2 - 4*c1*c3)
           if c1 == 0:
@@ -139,6 +148,7 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_
     #   A = A / np.abs(A).max()
     # A = np.minimum(2, A)
     # A = np.maximum(-2, A)
+    
     # difference from the previous iterate
     dA, dsigma_sqr = np.linalg.norm(A - A_prev), np.linalg.norm(sigma_sqr.reshape(-1) - sigma_sqr_prev.reshape(-1))
 
@@ -150,13 +160,13 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
    N, D = X.shape
    K = mu.shape[1]
    new_X = np.zeros_like(X)
-   for d in range(D):
+   for i in range(D):
      cur_sum = np.zeros(N)
      for k in range(K):
-       scaled = (X[:, d] - mu[d,k]) / sigma_sqr[d,k]
+       scaled = (X[:, i] - mu[i,k]) / sigma_sqr[i,k]**0.5
        # scaled[np.isnan(scaled)] = 0
-       cur_sum += pi[d,k] * norm.cdf(scaled)
-     new_X[:, d] += norm.ppf(cur_sum)
+       cur_sum += pi[i,k] * norm.cdf(scaled)
+     new_X[:, i] += norm.ppf(cur_sum)
    return new_X
 
 def eval_NLL(X):
