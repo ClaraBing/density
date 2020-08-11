@@ -90,8 +90,7 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
             B[d] += weighted_X.sum(0)
         B /= N
 
-        A += gamma * (-1 * np.linalg.inv(A).T + B)
-      print(A.reshape(-1))
+        A += gamma * (np.linalg.inv(A).T + B)
 
     elif A_mode == 'CF': # closed form
       if VERBOSE: print(A.reshape(-1))
@@ -161,7 +160,6 @@ def eval_NLL(X):
   exponents = 0.5 * (X**2).sum(1)
   if exponents.max() > 10:
     print("NLL: exponents large.")
-    pdb.set_trace()
   return 0.5 * X.shape[1] * np.log(2*np.pi) + exponents.mean()
 
 def get_aranges(low, up, n_steps):

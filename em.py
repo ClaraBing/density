@@ -33,9 +33,9 @@ def fit(X):
   plt.clf()
 
   A_mode = 'GA'
-  K = 10
+  K = 40
   n_steps = 80
-  gamma_low, gamma_up = 1e-5, 1e-3
+  gamma_low, gamma_up = 1e-7, 1e-5
   gammas = get_aranges(gamma_low, gamma_up, n_steps)
   threshs = get_aranges(1e-9, 1e-5, n_steps)
   A, pi, mu, sigma = None, None, None, None
