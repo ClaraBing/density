@@ -9,24 +9,26 @@ import pdb
 
 VERBOSE = 1
 
-def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_mode='GA'):
+def init_params(D, K):
+  # rotation matrix
+  # TODO: which way to initialize?
+  A = ortho_group.rvs(D)
+  # A = np.eye(D)
+  # prior - uniform
+  pi = np.ones([D, K]) / K
+  # GM means
+  mu = np.array([np.arange(-2, 2, 4/K) for _ in range(D)])
+  # GM variances
+  sigma_sqr = np.ones([D, K])
+
+  return A, pi, mu, sigma_sqr
+
+
+def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
   N, D = X.shape
   max_em_steps = 50
   n_gd_steps = 10
 
-  # init
-  if A is None:
-    # rotation matrix
-    # TODO: which way to initialize?
-    A = ortho_group.rvs(D)
-    # A = np.eye(D)
-    # prior - uniform
-    pi = np.ones([D, K]) / K
-    # GM means
-    mu = np.array([np.arange(-2, 2, 4/K) for _ in range(D)])
-    # GM variances
-    sigma_sqr = np.ones([D, K])
-  
   END = lambda dA, dsigma_sqr: (dA + dsigma_sqr) < threshold
   
   niters = 0
@@ -48,10 +50,10 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_
           if sigma_sqr[d,k] != 0:
             exponents[:, d, k] = diff_square[:, d, k] / sigma_sqr[d,k]
             w[:, d, k] = pi[d,k] * np.exp(-0.5*exponents[:, d, k])
-          else:
-            print('sigma_sqr[{}, {}] = 0.'.format(d, k))
-            pdb.set_trace()
-            w[:, d, k] = 0
+          # else:
+          #   print('sigma_sqr[{}, {}] = 0.'.format(d, k))
+          #   pdb.set_trace()
+          #   w[:, d, k] = 0
         Ksum = w[:, d].sum(-1)
         # row_sum[row_sum==0] = 1 # avoid divide-by-zero
         mask_good = np.abs(Ksum) > 1e-3
@@ -71,6 +73,9 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_
             mu[d,k] = w[:, d, k].dot(Y[d]) / w_sumN[d,k]
             diff_square[:, d, k] = (cur_y - mu[d,k])**2 
             sigma_sqr[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / w_sumN[d,k]
+            if sigma_sqr[d,k] == 0:
+              print('sigma_sqr[{}, {}] = 0,'.format(d,k))
+              pdb.set_trace()
           else:
             print('w_sumN[{}, {}] = 0.'.format(d, k))
             pdb.set_trace()
@@ -141,6 +146,9 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_
             new_A[i,j] = A[i,j]
           else:
             new_A[i,j] = 0.5 * (-c2 + tmp) / c1
+          if abs(new_A[i,j]) > 10:
+            print('A value too large: new_A[{},{}] = {}'.format(i, j, new_A[i,j]))
+            pdb.set_trace()
       A = new_A
             
     # clip entries of A to be [-2, 2]
