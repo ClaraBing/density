@@ -7,19 +7,23 @@ from data.dataset_mixture import GaussianMixture
 
 import pdb
 
-def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode='GD'):
+VERBOSE = False
+
+def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode='GA'):
   N, D = X.shape
-  max_steps = 50
+  max_em_steps = 50
+  n_gd_steps = 10
 
   # init
   if A is None:
     # rotation matrix
-    # A = ortho_group.rvs(D)
-    A = np.eye(D)
-    # prior
+    # TODO: which way to initialize?
+    A = ortho_group.rvs(D)
+    # A = np.eye(D)
+    # prior - uniform
     pi = np.ones([D, K]) / K
     # GM means
-    mu = np.random.randn(D, K)
+    mu = np.zeros([D, K])
     # GM variances
     sigma = np.ones([D, K])
   
@@ -27,10 +31,10 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
   
   niters = 0
   dA, dsigma = 10, 10
-  while (not END(dA, dsigma)) and niters < max_steps:
+  while (not END(dA, dsigma)) and niters < max_em_steps:
     niters += 1
     A_prev, sigma_prev = A.copy(), sigma.copy()
-  
+
     # E-step - update posterior counts
     w = np.zeros([N, D, K])
     Y = A.dot(X.T) # D x N
@@ -44,39 +48,45 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
           exponents[:, d, k] = diff_square[:, d, k] / sigma[d,k]**2
           w[:, d, k] = pi[d,k] * np.exp(-0.5*exponents[:, d, k])
         else:
-          print('w_[:, {}, {}] is 0'.format(d, k))
-          pdb.set_trace()
-          # w[:, d, k] = 0
+          w[:, d, k] = 0
       row_sum = w[:, d].sum(-1).reshape(-1, 1)
       row_sum[row_sum==0] = 1 # avoid divide-by-zero
       w[:, d] /= row_sum
-  
-    # M-step
     w_sumN = w.sum(0)
     w_sumNK = w_sumN.sum(-1)
-    for d in range(D):
-      for k in range(K):
-        pi[d,k] = w_sumN[d,k] / w_sumNK[d]
-        if w_sumN[d, k] != 0:
-          mu[d,k] = w[:, d, k].dot(Y[d]) / w_sumN[d,k]
-          sigma[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / w_sumN[d,k]
-        else:
-          mu[d,k] = 0
-          sigma[d,k] = 1
 
-    B = np.zeros([D, D])
-    weights = w * exponents
-    for d in range(D):
-      for k in range(K):
-        scaled = (Y[d] - mu[d,k]) / sigma[d,k]**2
-        weighted_X = (w[:, d, k] * scaled).reshape(-1,1) * X
-        # weighted_X = (weights[:, d, k].reshape(-1, 1)) * X
-        B[d] = weighted_X.sum(0)
+    # M-step
+    if A_mode == 'GA': # gradient ascent
+      for _ in range(n_gd_steps):
+        if VERBOSE: print(A.reshape(-1))
+        Y = A.dot(X.T) # D x N
+    
+        for d in range(D):
+          cur_y = Y[d]
+          for k in range(K):
+            pi[d,k] = w_sumN[d,k] / w_sumNK[d]
+            if w_sumN[d, k] != 0:
+              mu[d,k] = w[:, d, k].dot(Y[d]) / w_sumN[d,k]
+              diff_square[:, d, k] = (cur_y - mu[d,k])**2 
+              sigma[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / w_sumN[d,k]
+            else:
+              mu[d,k] = 0
+              sigma[d,k] = 1
 
-    if A_mode == 'GD':
-      A += gamma * (np.linalg.inv(A).T + B)
-    elif A_mode == 'CF': # closed form
+        B = np.zeros([D, D])
+        weights = w * exponents
+        for d in range(D):
+          for k in range(K):
+            scaled = (- Y[d] + mu[d,k]) / sigma[d,k]**2
+            weighted_X = (w[:, d, k] * scaled).reshape(-1,1) * X
+            B[d] += weighted_X.sum(0)
+        B /= N
+
+        A += gamma * (-1 * np.linalg.inv(A).T + B)
       print(A.reshape(-1))
+
+    elif A_mode == 'CF': # closed form
+      if VERBOSE: print(A.reshape(-1))
       cofs = np.zeros_like(A)
       for i in range(D):
         for j in range(D):
@@ -104,7 +114,7 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
           c2b *= cof_common_term
           c2 = c2a + c2b
           c3 *= cof_common_term
-          c3 -= cofs[i,j]
+          c3 -= N*cofs[i,j]
           
           tmp = np.sqrt(c2**2 - 4*c1*c3)
           if c1 == 0:
@@ -112,13 +122,17 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
           else:
             new_A[i,j] = 0.5 * (-c2 + tmp) / c1
       A = new_A
-          
+            
+    # clip entries of A to be [-2, 2]
+    if np.abs(A).max() > 2:
+      A = A / np.abs(A).max()
+    # A = np.minimum(2, A)
+    # A = np.maximum(-2, A)
     # difference from the previous iterate
     dA, dsigma = np.linalg.norm(A - A_prev), np.linalg.norm(sigma.reshape(-1) - sigma_prev.reshape(-1))
-    # wandb.log({'niters'})
-    # print('#{}: dA={:.3e} / dsigma={:.3e}'.format(niters, dA, dsigma))
 
   print('#{}: dA={:.3e} / dsigma={:.3e}'.format(niters, dA, dsigma))
+  print('A:', A.reshape(-1))
   return A, pi, mu, sigma
 
 def gaussianize_1d(X, pi, mu, sigma):
@@ -137,6 +151,9 @@ def gaussianize_1d(X, pi, mu, sigma):
 def eval_NLL(X):
   # evaluate the negative log likelihood of X coming from a standard normal.
   exponents = 0.5 * (X**2).sum(1)
+  if exponents.max() > 10:
+    print("NLL: exponents large.")
+    pdb.set_trace()
   return 0.5 * X.shape[1] * np.log(2*np.pi) + exponents.mean()
 
 def get_aranges(low, up, n_steps):
