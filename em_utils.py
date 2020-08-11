@@ -9,7 +9,7 @@ import pdb
 
 VERBOSE = False
 
-def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode='GA'):
+def EM(X, K, gamma, A=None, pi=None, mu=None, sigma_sqr=None, threshold=5e-5, A_mode='GA'):
   N, D = X.shape
   max_em_steps = 50
   n_gd_steps = 10
@@ -25,15 +25,15 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
     # GM means
     mu = np.zeros([D, K])
     # GM variances
-    sigma = np.ones([D, K])
+    sigma_sqr = np.ones([D, K])
   
-  END = lambda dA, dsigma: (dA + dsigma) < threshold
+  END = lambda dA, dsigma_sqr: (dA + dsigma_sqr) < threshold
   
   niters = 0
-  dA, dsigma = 10, 10
-  while (not END(dA, dsigma)) and niters < max_em_steps:
+  dA, dsigma_sqr = 10, 10
+  while (not END(dA, dsigma_sqr)) and niters < max_em_steps:
     niters += 1
-    A_prev, sigma_prev = A.copy(), sigma.copy()
+    A_prev, sigma_sqr_prev = A.copy(), sigma_sqr.copy()
 
     def E():
       # E-step - update posterior counts
@@ -45,8 +45,8 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
         cur_y = Y[d]
         for k in range(K):
           diff_square[:, d, k] = (cur_y - mu[d,k])**2 
-          if sigma[d,k] != 0:
-            exponents[:, d, k] = diff_square[:, d, k] / sigma[d,k]**2
+          if sigma_sqr[d,k] != 0:
+            exponents[:, d, k] = diff_square[:, d, k] / sigma_sqr[d,k]
             w[:, d, k] = pi[d,k] * np.exp(-0.5*exponents[:, d, k])
           else:
             w[:, d, k] = 0
@@ -55,9 +55,9 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
         w[:, d] /= row_sum
       w_sumN = w.sum(0)
       w_sumNK = w_sumN.sum(-1)
-      return w, w_sumN, w_sumNK, diff_square, exponents
+      return Y, w, w_sumN, w_sumNK, diff_square, exponents
 
-    w, w_sumN, w_sumNK, diff_square, exponents = E()
+    Y, w, w_sumN, w_sumNK, diff_square, exponents = E()
 
     # M-step
     if A_mode == 'GA': # gradient ascent
@@ -65,10 +65,8 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
         if VERBOSE: print(A.reshape(-1))
         
         if True: # TODO: should I update w per GD step?
-          w, w_sumN, w_sumNK, diff_square, exponents = E()
+          Y, w, w_sumN, w_sumNK, diff_square, exponents = E()
 
-        Y = A.dot(X.T) # D x N
-    
         for d in range(D):
           cur_y = Y[d]
           for k in range(K):
@@ -76,16 +74,16 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
             if w_sumN[d, k] != 0:
               mu[d,k] = w[:, d, k].dot(Y[d]) / w_sumN[d,k]
               diff_square[:, d, k] = (cur_y - mu[d,k])**2 
-              sigma[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / w_sumN[d,k]
+              sigma_sqr[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / w_sumN[d,k]
             else:
               mu[d,k] = 0
-              sigma[d,k] = 1
+              sigma_sqr[d,k] = 1
 
         B = np.zeros([D, D])
         weights = w * exponents
         for d in range(D):
           for k in range(K):
-            scaled = (- Y[d] + mu[d,k]) / sigma[d,k]**2
+            scaled = (- Y[d] + mu[d,k]) / sigma_sqr[d,k]
             weighted_X = (w[:, d, k] * scaled).reshape(-1,1) * X
             B[d] += weighted_X.sum(0)
         B /= N
@@ -94,14 +92,20 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
 
     elif A_mode == 'CF': # closed form
       if VERBOSE: print(A.reshape(-1))
-      cofs = np.zeros_like(A)
-      for i in range(D):
-        for j in range(D):
-          cofs[i,j] = cof(A, i, j)
+      det = np.linalg.det(A)
+      if np.abs(det) > 0.05:
+        # invertible A: adjugate = det * inv.T
+        cofs = det * np.linalg.inv(A).T
+      else:
+        cofs = np.zeros_like(A)
+        for i in range(D):
+          for j in range(D):
+            cofs[i,j] = cof(A, i, j)
 
       new_A = np.zeros_like(A)
+      weights = w / sigma_sqr
       for i in range(D):
-        common_sums = A[j].reshape(-1, 1) * X.T
+        common_sums = A[i].reshape(-1, 1) * X.T
         total_sum = common_sums.sum(0)
         for j in range(D):
           j_common_sum = total_sum - common_sums[j]
@@ -109,8 +113,8 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
 
           c1, c2a, c2b, c3 = 0, 0, 0, 0
           for k in range(K):
-            t1 = (w[:,j,k] * (X[:,j]**2) / sigma[i,k]**2).sum()
-            t2 = (w[:,i,k] * X[:,j] * (j_common_sum - mu[i,k]) / sigma[i,k]**2).sum()
+            t1 = (weights[:,j,k] * (X[:,j]**2)).sum()
+            t2 = (weights[:,i,k] * X[:,j] * (j_common_sum - mu[i,k])).sum()
             c1 += t1
             c2a += t2
             c2b += t1
@@ -136,20 +140,20 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
     # A = np.minimum(2, A)
     # A = np.maximum(-2, A)
     # difference from the previous iterate
-    dA, dsigma = np.linalg.norm(A - A_prev), np.linalg.norm(sigma.reshape(-1) - sigma_prev.reshape(-1))
+    dA, dsigma_sqr = np.linalg.norm(A - A_prev), np.linalg.norm(sigma_sqr.reshape(-1) - sigma_sqr_prev.reshape(-1))
 
-  print('#{}: dA={:.3e} / dsigma={:.3e}'.format(niters, dA, dsigma))
+  print('#{}: dA={:.3e} / dsigma_sqr={:.3e}'.format(niters, dA, dsigma_sqr))
   print('A:', A.reshape(-1))
-  return A, pi, mu, sigma
+  return A, pi, mu, sigma_sqr
 
-def gaussianize_1d(X, pi, mu, sigma):
+def gaussianize_1d(X, pi, mu, sigma_sqr):
    N, D = X.shape
    K = mu.shape[1]
    new_X = np.zeros_like(X)
    for d in range(D):
      cur_sum = np.zeros(N)
      for k in range(K):
-       scaled = (X[:, d] - mu[d,k]) / sigma[d,k]
+       scaled = (X[:, d] - mu[d,k]) / sigma_sqr[d,k]
        # scaled[np.isnan(scaled)] = 0
        cur_sum += pi[d,k] * norm.cdf(scaled)
      new_X[:, d] += norm.ppf(cur_sum)
