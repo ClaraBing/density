@@ -32,7 +32,7 @@ def fit(X):
   plt.savefig('figs/hist2d_init.png')
   plt.clf()
 
-  A_mode = 'GA'
+  A_mode = 'random'
   D = X.shape[1]
   K = 40
   n_steps = 80
@@ -43,7 +43,10 @@ def fit(X):
   print('Initial NLL:', eval_NLL(X))
   for i in range(n_steps):
     print('iteration', i)
-    # A, pi, mu, sigma_sqr = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i], A_mode=A_mode)
+    if A_mode == 'random':
+      A = ortho_group.rvs(D)
+    else:
+      A, pi, mu, sigma_sqr = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i], A_mode=A_mode)
     print('mu: mean={:.3e}/ std={:.3e}'.format(mu.mean(), mu.std()))
     print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
     Y = X.dot(A.T)
