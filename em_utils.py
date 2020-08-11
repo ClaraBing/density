@@ -35,30 +35,38 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
     niters += 1
     A_prev, sigma_prev = A.copy(), sigma.copy()
 
-    # E-step - update posterior counts
-    w = np.zeros([N, D, K])
-    Y = A.dot(X.T) # D x N
-    diff_square = np.zeros([N, D, K])
-    exponents = np.zeros([N, D, K])
-    for d in range(D):
-      cur_y = Y[d]
-      for k in range(K):
-        diff_square[:, d, k] = (cur_y - mu[d,k])**2 
-        if sigma[d,k] != 0:
-          exponents[:, d, k] = diff_square[:, d, k] / sigma[d,k]**2
-          w[:, d, k] = pi[d,k] * np.exp(-0.5*exponents[:, d, k])
-        else:
-          w[:, d, k] = 0
-      row_sum = w[:, d].sum(-1).reshape(-1, 1)
-      row_sum[row_sum==0] = 1 # avoid divide-by-zero
-      w[:, d] /= row_sum
-    w_sumN = w.sum(0)
-    w_sumNK = w_sumN.sum(-1)
+    def E():
+      # E-step - update posterior counts
+      w = np.zeros([N, D, K])
+      Y = A.dot(X.T) # D x N
+      diff_square = np.zeros([N, D, K])
+      exponents = np.zeros([N, D, K])
+      for d in range(D):
+        cur_y = Y[d]
+        for k in range(K):
+          diff_square[:, d, k] = (cur_y - mu[d,k])**2 
+          if sigma[d,k] != 0:
+            exponents[:, d, k] = diff_square[:, d, k] / sigma[d,k]**2
+            w[:, d, k] = pi[d,k] * np.exp(-0.5*exponents[:, d, k])
+          else:
+            w[:, d, k] = 0
+        row_sum = w[:, d].sum(-1).reshape(-1, 1)
+        row_sum[row_sum==0] = 1 # avoid divide-by-zero
+        w[:, d] /= row_sum
+      w_sumN = w.sum(0)
+      w_sumNK = w_sumN.sum(-1)
+      return w, w_sumN, w_sumNK, diff_square, exponents
+
+    w, w_sumN, w_sumNK, diff_square, exponents = E()
 
     # M-step
     if A_mode == 'GA': # gradient ascent
       for _ in range(n_gd_steps):
         if VERBOSE: print(A.reshape(-1))
+        
+        if True: # TODO: should I update w per GD step?
+          w, w_sumN, w_sumNK, diff_square, exponents = E()
+
         Y = A.dot(X.T) # D x N
     
         for d in range(D):
@@ -124,8 +132,8 @@ def EM(X, K, gamma, A=None, pi=None, mu=None, sigma=None, threshold=5e-5, A_mode
       A = new_A
             
     # clip entries of A to be [-2, 2]
-    if np.abs(A).max() > 2:
-      A = A / np.abs(A).max()
+    # if np.abs(A).max() > 2:
+    #   A = A / np.abs(A).max()
     # A = np.minimum(2, A)
     # A = np.maximum(-2, A)
     # difference from the previous iterate
