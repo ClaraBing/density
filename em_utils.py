@@ -2,7 +2,6 @@ import numpy as np
 from scipy.stats import ortho_group, norm
 
 # local imports
-# from data import get_loader
 from data.dataset_mixture import GaussianMixture
 
 import pdb
@@ -14,7 +13,6 @@ def init_params(D, K, mu_low, mu_up):
   # rotation matrix
   # TODO: which way to initialize?
   A = ortho_group.rvs(D)
-  # A = np.eye(D)
   # prior - uniform
   pi = np.ones([D, K]) / K
   # GM means
@@ -53,13 +51,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
           if sigma_sqr[d,k] != 0:
             exponents[:, d, k] = diff_square[:, d, k] / np.maximum(sigma_sqr[d,k], SMALL)
             w[:, d, k] = pi[d,k] * np.exp(-0.5*exponents[:, d, k]) / np.maximum(sigma_sqr[d,k]**0.5, SMALL)
-            # print('w[:, d, k]: max={:.4e} / min={:.4e}'.format(w[:, d,k].max(), w[:, d,k].min()))
-          # else:
-          #   print('sigma_sqr[{}, {}] = 0.'.format(d, k))
-          #   pdb.set_trace()
-          #   w[:, d, k] = 0
         Ksum = w[:, d].sum(-1)
-        # row_sum[row_sum==0] = 1 # avoid divide-by-zero
         if False:
           mask_good = np.abs(Ksum) > 1e-3
           mask_bad = np.abs(Ksum) <= 1e-3
@@ -68,9 +60,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
         if True:
           w[:, d] /= np.maximum(Ksum.reshape(-1,1),  SMALL)
       w_sumN = w.sum(0)
-      # if w_sumN.min() < 1e-10:
-      #   print('w_sumN too small:', w_sumN.min())
-      #   pdb.set_trace()
       w_sumNK = w_sumN.sum(-1)
       return Y, w, w_sumN, w_sumNK, diff_square, exponents
 
@@ -84,10 +73,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
           diff_square[:, d, k] = (cur_y - mu[d,k])**2 
           if sigma_sqr[d,k] != 0:
             exponents[:, d, k] = diff_square[:, d, k] / np.maximum(sigma_sqr[d,k], SMALL)
-          # else:
-          #   print('sigma_sqr[{}, {}] = 0.'.format(d, k))
-          #   pdb.set_trace()
-          #   w[:, d, k] = 0
       return Y, diff_square, exponents
 
     def update_pi_mu_sigma():
@@ -99,18 +84,8 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
             mu[d,k] = w[:, d, k].dot(Y[d]) / np.maximum(w_sumN[d,k], SMALL)
             diff_square[:, d, k] = (cur_y - mu[d,k])**2 
             sigma_sqr[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / np.maximum(w_sumN[d,k], SMALL)
-            # if sigma_sqr[d,k] == 0:
-            #   print('sigma_sqr[{}, {}] = 0,'.format(d,k))
-            #   pdb.set_trace()
-          # else:
-          #   print('w_sumN[{}, {}] = 0.'.format(d, k))
-          #   pdb.set_trace()
-          #   mu[d,k] = 0
-          #   sigma_sqr[d,k] = 1
 
     Y, w, w_sumN, w_sumNK, diff_square, exponents = E()
-
-    # pdb.set_trace()
 
     # M-step
     if A_mode == 'GA': # gradient ascent
@@ -139,8 +114,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
 
     elif A_mode == 'CF': # closed form
       update_pi_mu_sigma()
-
-      # pdb.set_trace()
 
       if VERBOSE: print(A.reshape(-1))
       det = np.linalg.det(A)
@@ -180,18 +153,9 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
             new_A[i,j] = A[i,j]
           else:
             new_A[i,j] = 0.5 * (-c2 + tmp) / c1
-          if abs(new_A[i,j]) > 10 and False:
-            print('A value too large: new_A[{},{}] = {}'.format(i, j, new_A[i,j]))
-            pdb.set_trace()
-      # pdb.set_trace()
+
       A = new_A
             
-    # clip entries of A to be [-2, 2]
-    # if np.abs(A).max() > 2:
-    #   A = A / np.abs(A).max()
-    # A = np.minimum(2, A)
-    # A = np.maximum(-2, A)
-    
     # difference from the previous iterate
     dA, dsigma_sqr = np.linalg.norm(A - A_prev), np.linalg.norm(sigma_sqr.reshape(-1) - sigma_sqr_prev.reshape(-1))
 
@@ -207,7 +171,6 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
      cur_sum = np.zeros(N)
      for k in range(K):
        scaled = (X[:, i] - mu[i,k]) / np.maximum(sigma_sqr[i,k]**0.5, SMALL)
-       # scaled[np.isnan(scaled)] = 0
        cur_sum += pi[i,k] * norm.cdf(scaled)
      new_X[:, i] += norm.ppf(cur_sum)
    return new_X
