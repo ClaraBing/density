@@ -15,7 +15,11 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--K', type=int, default=10)
 parser.add_argument('--n-steps', type=int, default=50)
 parser.add_argument('--mode', type=str, choices=['GA', 'CF'])
-parser.add_argument('--data', type=str, choices=['normal', 'scaledNormal', 'rotatedNormal', 'GM', 'ring'])
+parser.add_argument('--data', type=str, choices=[
+       # connected
+       'normal', 'scaledNormal', 'rotatedNormal', 'ring',
+       # disconnected
+       'GM', 'GMn2', 'concentric'])
 args = parser.parse_args()
 
 
@@ -56,20 +60,29 @@ if __name__ == '__main__':
   # test()
   # gen_data()
 
+  data_dir = './datasets/EM'
+
   data_token = args.data
   mu_low, mu_up = -2, 2
   if data_token == 'GM':
-    X = np.load('GM_2d.npy')
+    fdata = 'GM_2d.npy'
+    mu_low, mu_up = -4, 4
+  if data_token == 'GMn2':
+    fdata = 'GM_2d_2centers.npy'
     mu_low, mu_up = -4, 4
   elif data_token == 'normal':
-    X = np.load('normal.npy')
+    fdata = 'normal.npy'
   elif data_token == 'rotatedNormal':
-    X = np.load('rotatedNormal.npy')
+    fdata = 'rotatedNormal.npy'
   elif data_token == 'scaledNormal':
-    X = np.load('scaledNormal.npy')
+    fdata = 'scaledNormal.npy'
   elif data_token == 'ring':
-    X = np.load('ring.npy')
+    fdata = 'ring.npy'
     mu_low, mu_up = -1, 1
+  elif data_token == 'concentric':
+    # 2 circles w/ radius 0.5 and 2. Each with 10k points.
+    fdata = 'concentric.npy'
 
+  X = np.load(os.path.join(data_dir, fdata))
   fit(X, mu_low, mu_up, data_token)
   
