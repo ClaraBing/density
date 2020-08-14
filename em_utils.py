@@ -7,9 +7,10 @@ from data.dataset_mixture import GaussianMixture
 
 import pdb
 
-VERBOSE = 1
+VERBOSE = 0
+SMALL = 1e-10
 
-def init_params(D, K):
+def init_params(D, K, mu_low, mu_up):
   # rotation matrix
   # TODO: which way to initialize?
   A = ortho_group.rvs(D)
@@ -17,9 +18,11 @@ def init_params(D, K):
   # prior - uniform
   pi = np.ones([D, K]) / K
   # GM means
-  mu = np.array([np.arange(-2, 2, 4/K) for _ in range(D)])
+  mu = np.array([np.arange(mu_low, mu_up, (mu_up-mu_low)/K) for _ in range(D)])
   # GM variances
   sigma_sqr = np.ones([D, K])
+  print('A:', A.reshape(-1))
+  print('mu: mean={} / std={}'.format(mu.mean(), mu.std()))
 
   return A, pi, mu, sigma_sqr
 
@@ -48,57 +51,86 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
         for k in range(K):
           diff_square[:, d, k] = (cur_y - mu[d,k])**2 
           if sigma_sqr[d,k] != 0:
-            exponents[:, d, k] = diff_square[:, d, k] / sigma_sqr[d,k]
-            w[:, d, k] = pi[d,k] * np.exp(-0.5*exponents[:, d, k])
+            exponents[:, d, k] = diff_square[:, d, k] / np.maximum(sigma_sqr[d,k], SMALL)
+            w[:, d, k] = pi[d,k] * np.exp(-0.5*exponents[:, d, k]) / np.maximum(sigma_sqr[d,k]**0.5, SMALL)
+            # print('w[:, d, k]: max={:.4e} / min={:.4e}'.format(w[:, d,k].max(), w[:, d,k].min()))
           # else:
           #   print('sigma_sqr[{}, {}] = 0.'.format(d, k))
           #   pdb.set_trace()
           #   w[:, d, k] = 0
         Ksum = w[:, d].sum(-1)
         # row_sum[row_sum==0] = 1 # avoid divide-by-zero
-        mask_good = np.abs(Ksum) > 1e-3
-        mask_bad = np.abs(Ksum) <= 1e-3
-        w[:, d][mask_good] /= Ksum[mask_good].reshape(-1,1)
-        w[:, d][mask_bad] = 1/K
+        if False:
+          mask_good = np.abs(Ksum) > 1e-3
+          mask_bad = np.abs(Ksum) <= 1e-3
+          w[:, d][mask_good] /= np.maximum(Ksum[mask_good].reshape(-1,1), SMALL)
+          w[:, d][mask_bad] = 1/K
+        if True:
+          w[:, d] /= np.maximum(Ksum.reshape(-1,1),  SMALL)
       w_sumN = w.sum(0)
+      # if w_sumN.min() < 1e-10:
+      #   print('w_sumN too small:', w_sumN.min())
+      #   pdb.set_trace()
       w_sumNK = w_sumN.sum(-1)
       return Y, w, w_sumN, w_sumNK, diff_square, exponents
+
+    def update_intermediate(X, w, A):
+      Y = A.dot(X.T) # D x N
+      diff_square = np.zeros([N, D, K])
+      exponents = np.zeros([N, D, K])
+      for d in range(D):
+        cur_y = Y[d]
+        for k in range(K):
+          diff_square[:, d, k] = (cur_y - mu[d,k])**2 
+          if sigma_sqr[d,k] != 0:
+            exponents[:, d, k] = diff_square[:, d, k] / np.maximum(sigma_sqr[d,k], SMALL)
+          # else:
+          #   print('sigma_sqr[{}, {}] = 0.'.format(d, k))
+          #   pdb.set_trace()
+          #   w[:, d, k] = 0
+      return Y, diff_square, exponents
 
     def update_pi_mu_sigma():
       for d in range(D):
         cur_y = Y[d]
         for k in range(K):
-          pi[d,k] = w_sumN[d,k] / w_sumNK[d]
+          pi[d,k] = w_sumN[d,k] / np.maximum(w_sumNK[d], SMALL)
           if w_sumN[d, k] != 0:
-            mu[d,k] = w[:, d, k].dot(Y[d]) / w_sumN[d,k]
+            mu[d,k] = w[:, d, k].dot(Y[d]) / np.maximum(w_sumN[d,k], SMALL)
             diff_square[:, d, k] = (cur_y - mu[d,k])**2 
-            sigma_sqr[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / w_sumN[d,k]
-            if sigma_sqr[d,k] == 0:
-              print('sigma_sqr[{}, {}] = 0,'.format(d,k))
-              pdb.set_trace()
-          else:
-            print('w_sumN[{}, {}] = 0.'.format(d, k))
-            pdb.set_trace()
-            mu[d,k] = 0
-            sigma_sqr[d,k] = 1
+            sigma_sqr[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / np.maximum(w_sumN[d,k], SMALL)
+            # if sigma_sqr[d,k] == 0:
+            #   print('sigma_sqr[{}, {}] = 0,'.format(d,k))
+            #   pdb.set_trace()
+          # else:
+          #   print('w_sumN[{}, {}] = 0.'.format(d, k))
+          #   pdb.set_trace()
+          #   mu[d,k] = 0
+          #   sigma_sqr[d,k] = 1
 
     Y, w, w_sumN, w_sumNK, diff_square, exponents = E()
+
+    # pdb.set_trace()
 
     # M-step
     if A_mode == 'GA': # gradient ascent
       for _ in range(n_gd_steps):
         if VERBOSE: print(A.reshape(-1))
         
-        if True: # TODO: should I update w per GD step?
+        if False: # TODO: should I update w per GD step?
           Y, w, w_sumN, w_sumNK, diff_square, exponents = E()
 
-        update_pi_mu_sigma()
+        if True:
+          Y, diff_square, exponents = update_intermediate(X, w, A)
 
+        update_pi_mu_sigma()
+        # pdb.set_trace()
+    
         B = np.zeros([D, D])
         weights = w * exponents
         for d in range(D):
           for k in range(K):
-            scaled = (- Y[d] + mu[d,k]) / sigma_sqr[d,k]
+            scaled = (- Y[d] + mu[d,k]) / np.maximum(sigma_sqr[d,k], SMALL)
             weighted_X = (w[:, d, k] * scaled).reshape(-1,1) * X
             B[d] += weighted_X.sum(0)
         B /= N
@@ -107,6 +139,8 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
 
     elif A_mode == 'CF': # closed form
       update_pi_mu_sigma()
+
+      # pdb.set_trace()
 
       if VERBOSE: print(A.reshape(-1))
       det = np.linalg.det(A)
@@ -120,7 +154,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
             cofs[i,j] = cof(A, i, j)
 
       new_A = np.zeros_like(A)
-      weights = w / sigma_sqr
+      weights = w / np.maximum(sigma_sqr, SMALL)
       for i in range(D):
         common_sums = A[i].reshape(-1, 1) * X.T # D x N
         total_sum = common_sums.sum(0)
@@ -142,13 +176,14 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
           c3 = cof_sum * c3 - N*cofs[i,j]
           
           tmp = np.sqrt(c2**2 - 4*c1*c3)
-          if c1 == 0:
+          if c1 < SMALL:
             new_A[i,j] = A[i,j]
           else:
             new_A[i,j] = 0.5 * (-c2 + tmp) / c1
-          if abs(new_A[i,j]) > 10:
+          if abs(new_A[i,j]) > 10 and False:
             print('A value too large: new_A[{},{}] = {}'.format(i, j, new_A[i,j]))
             pdb.set_trace()
+      # pdb.set_trace()
       A = new_A
             
     # clip entries of A to be [-2, 2]
@@ -171,7 +206,7 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
    for i in range(D):
      cur_sum = np.zeros(N)
      for k in range(K):
-       scaled = (X[:, i] - mu[i,k]) / sigma_sqr[i,k]**0.5
+       scaled = (X[:, i] - mu[i,k]) / np.maximum(sigma_sqr[i,k]**0.5, SMALL)
        # scaled[np.isnan(scaled)] = 0
        cur_sum += pi[i,k] * norm.cdf(scaled)
      new_X[:, i] += norm.ppf(cur_sum)
@@ -194,6 +229,15 @@ def cof(A, i, j):
   Am[:i, j:] = A[:i, j+1:]
   Am[i:, j:] = A[i+1:, j+1:]
   return (-1)**(i+j) * np.linalg.det(Am)
+
+def gen_data():
+  dlen = 100000
+  dset = GaussianMixture(dlen)
+  data = []
+  for _ in range(dlen):
+    data += dset.__getitem__(0),
+  data = np.array(data)
+  pdb.set_trace()
 
 
 
