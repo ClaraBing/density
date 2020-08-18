@@ -32,8 +32,8 @@ def init_params(D, K, mu_low, mu_up):
 
 def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
   N, D = X.shape
-  max_em_steps = 20
-  n_gd_steps = 10
+  max_em_steps = 30
+  n_gd_steps = 20
 
   END = lambda dA, dsigma_sqr: (dA + dsigma_sqr) < threshold
   
@@ -87,6 +87,9 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
         B = weighted_X.sum(0).sum(-1) / N
 
         A += gamma * (np.linalg.inv(A).T + B)
+        _, ss, _ = np.linalg.svd(A)
+        A /= ss[0]
+
 
     elif A_mode == 'CF': # closed form
       update_pi_mu_sigma()
