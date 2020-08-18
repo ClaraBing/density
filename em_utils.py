@@ -135,14 +135,11 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
 
 def gaussianize_1d(X, pi, mu, sigma_sqr):
    N, D = X.shape
-   K = mu.shape[1]
-   new_X = np.zeros_like(X)
-   for i in range(D):
-     cur_sum = np.zeros(N)
-     for k in range(K):
-       scaled = (X[:, i] - mu[i,k]) / sigma_sqr[i,k]**0.5
-       cur_sum += pi[i,k] * norm.cdf(scaled)
-     new_X[:, i] += norm.ppf(cur_sum)
+
+   scaled = (X.reshape(N, D, 1) - mu) / sigma_sqr**0.5
+   cdf = norm.cdf(scaled)
+   new_distr = pi * cdf
+   new_X = norm.ppf(new_distr.sum(-1))
    return new_X
 
 def eval_NLL(X):
@@ -165,14 +162,15 @@ def cof(A, i, j):
 
 def gen_data():
   dlen = 100000
-  dset = GaussianMixture(dlen)
+  scale = 2
+  dset = GaussianMixture(dlen, scale)
   data = []
   for _ in range(dlen):
     data += dset.__getitem__(0),
   data = np.array(data)
-  pdb.set_trace()
+  np.save('GM_2d_scale{}.npy'.format(scale), data)
 
 if __name__ == '__main__':
   # TODO: larger variance -> almost connected modes? 
-
+  gen_data()
 
