@@ -6,8 +6,8 @@ import argparse
 
 # from data import get_loader
 from data.dataset_mixture import GaussianMixture
-# from em_utils_np import *
-from em_utils_torch import *
+from em_utils_np import *
+# from em_utils_torch import *
 
 import pdb
 
@@ -26,12 +26,10 @@ args = parser.parse_args()
 
 
 def fit(X, mu_low, mu_up, data_token=''):
-  # x = X.cpu().numpy()
   x = X
   fimg = 'figs/hist2d_{}_init.png'.format(data_token)
   plot_hist(x, fimg)
 
-  # A_mode = 'GA'
   A_mode = args.mode
   D = X.shape[1]
   K = args.K
@@ -40,8 +38,6 @@ def fit(X, mu_low, mu_up, data_token=''):
   gammas = get_aranges(gamma_low, gamma_up, n_steps)
   threshs = get_aranges(1e-9, 1e-5, n_steps)
   A, pi, mu, sigma_sqr = init_params(D, K, mu_low, mu_up)
-  # mu_id = np.random.choice(len(X), K, replace=False)
-  # mu = X[mu_id].T
   print('Initial NLL:', eval_NLL(X))
   for i in range(n_steps):
     print('iteration', i)
@@ -102,6 +98,5 @@ if __name__ == '__main__':
   data_token += args.save_token
 
   X = np.load(os.path.join(data_dir, fdata))
-  # X = torch.tensor(X)
   fit(X, mu_low, mu_up, data_token)
   

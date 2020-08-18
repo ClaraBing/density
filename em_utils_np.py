@@ -92,48 +92,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
 
 
     elif A_mode == 'CF': # closed form
-      update_pi_mu_sigma()
-
-      if VERBOSE: print(A.reshape(-1))
-      det = np.linalg.det(A)
-      if np.abs(det) > 0.05:
-        # invertible A: adjugate = det * inv.T
-        cofs = det * np.linalg.inv(A).T
-      else:
-        cofs = np.zeros_like(A)
-        for i in range(D):
-          for j in range(D):
-            cofs[i,j] = cof(A, i, j)
-
-      new_A = np.zeros_like(A)
-      weights = w / sigma_sqr
-      for i in range(D):
-        common_sums = A[i].reshape(-1, 1) * X.T # D x N
-        total_sum = common_sums.sum(0)
-        for j in range(D):
-          j_common_sum = total_sum - common_sums[j]
-          cof_sum = A[i].dot(cofs[i]) - A[i,j]*cofs[i,j]
-
-          c1, c2a, c2b, c3 = 0, 0, 0, 0
-          for k in range(K):
-            t1 = (weights[:,j,k] * (X[:,j]**2)).sum()
-            t2 = (weights[:,i,k] * X[:,j] * (j_common_sum - mu[i,k])).sum()
-            c1 += t1
-            c2a += t2
-            c2b += t1
-            c3 += t2
-
-          c1 *= cofs[i, j]
-          c2 = cofs[i,j] * c2a + cof_sum * c2b
-          c3 = cof_sum * c3 - N*cofs[i,j]
-          
-          tmp = np.sqrt(c2**2 - 4*c1*c3)
-          if np.abs(c1) < SMALL:
-            new_A[i,j] = A[i,j]
-          else:
-            new_A[i,j] = 0.5 * (-c2 + tmp) / c1
-
-      A = new_A
+      raise NotImplementedError("mode CF: not implemented yet.")
             
     # difference from the previous iterate
     dA, dsigma_sqr = np.linalg.norm(A - A_prev), np.linalg.norm(sigma_sqr.reshape(-1) - sigma_sqr_prev.reshape(-1))
@@ -165,14 +124,6 @@ def eval_NLL(X):
 def get_aranges(low, up, n_steps):
   return np.arange(low, up, (up-low)/n_steps)[::-1]
 
-def cof(A, i, j):
-  Am = np.zeros([A.shape[0]-1, A.shape[1]-1])
-  Am[:i,:j] = A[:i, :j]
-  Am[i:, :j] = A[i+1:, :j]
-  Am[:i, j:] = A[:i, j+1:]
-  Am[i:, j:] = A[i+1:, j+1:]
-  return (-1)**(i+j) * np.linalg.det(Am)
-
 def plot_hist(data, fimg):
   plt.figure(figsize=[8,8])
   plt.hist2d(data[:,0], data[:,1], bins=[100,100])
@@ -182,9 +133,8 @@ def plot_hist(data, fimg):
   plt.clf()
   plt.close()
 
-def gen_data():
+def gen_data(scale):
   dlen = 100000
-  scale = 2
   dset = GaussianMixture(dlen, scale)
   data = []
   for _ in range(dlen):
@@ -193,6 +143,6 @@ def gen_data():
   np.save('GM_2d_scale{}.npy'.format(scale), data)
 
 if __name__ == '__main__':
-  # TODO: larger variance -> almost connected modes? 
-  gen_data()
+  scale = 2
+  gen_data(scale)
 
