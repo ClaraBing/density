@@ -52,13 +52,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
 
       w_sumN = np.maximum(w.sum(0), SMALL)
       w_sumNK = np.maximum(w_sumN.sum(-1), SMALL)
-      return Y, w, w_sumN, w_sumNK #, diff_square, exponents
-
-    def update_intermediate(X, w, A):
-      Y = A.dot(X.T) # D x N
-      diff_square = (Y.transpose(1,0).reshape(N, D, 1) - mu)**2
-      exponents = diff_square / sigma_sqr
-      return Y, diff_square, exponents
+      return Y, w, w_sumN, w_sumNK
 
     def update_pi_mu_sigma(X, A, w_sumN, w_sumNK):
       Y = A.dot(X.T) # D x N
@@ -66,10 +60,9 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
       mu = (Y.transpose(1,0).reshape(N, D, 1) * w).sum(0) / w_sumN
       diff_square = (Y.transpose(1,0).reshape(N, D, 1) - mu)**2
       sigma_sqr = (w * diff_square).sum(0) / w_sumN
-      mu = np.maximum(mu, SMALL)
-      # diff_square = np.maximum(diff_square, SMALL)
+      mu[np.abs(mu) < SMALL] = SMALL 
       sigma_sqr = np.maximum(sigma_sqr, SMALL)
-      return pi, mu, sigma_sqr #, diff_square, sigma_sqr
+      return pi, mu, sigma_sqr
 
     Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr)
 
@@ -79,10 +72,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
         if VERBOSE: print(A.reshape(-1))
         
         if False: # TODO: should I update w per GD step?
-          Y, w, w_sumN, w_sumNK, diff_square, exponents = E(pi, mu, sigma_sqr)
-
-        if False:
-          Y, diff_square, exponents = update_intermediate(X, w, A)
+          Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr)
 
         pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
 
@@ -91,7 +81,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
         B = weighted_X.sum(0).sum(-1) / N
 
         A += gamma * (np.linalg.inv(A).T + B)
-        pdb.set_trace()
 
     elif A_mode == 'CF': # closed form
       update_pi_mu_sigma()
@@ -108,7 +97,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
             cofs[i,j] = cof(A, i, j)
 
       new_A = np.zeros_like(A)
-      weights = w / np.maximum(sigma_sqr, SMALL)
+      weights = w / sigma_sqr
       for i in range(D):
         common_sums = A[i].reshape(-1, 1) * X.T # D x N
         total_sum = common_sums.sum(0)
@@ -130,7 +119,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
           c3 = cof_sum * c3 - N*cofs[i,j]
           
           tmp = np.sqrt(c2**2 - 4*c1*c3)
-          if c1 < SMALL:
+          if np.abs(c1) < SMALL:
             new_A[i,j] = A[i,j]
           else:
             new_A[i,j] = 0.5 * (-c2 + tmp) / c1
@@ -151,7 +140,7 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
    for i in range(D):
      cur_sum = np.zeros(N)
      for k in range(K):
-       scaled = (X[:, i] - mu[i,k]) / np.maximum(sigma_sqr[i,k]**0.5, SMALL)
+       scaled = (X[:, i] - mu[i,k]) / sigma_sqr[i,k]**0.5
        cur_sum += pi[i,k] * norm.cdf(scaled)
      new_X[:, i] += norm.ppf(cur_sum)
    return new_X
@@ -183,5 +172,7 @@ def gen_data():
   data = np.array(data)
   pdb.set_trace()
 
+if __name__ == '__main__':
+  # TODO: larger variance -> almost connected modes? 
 
 
