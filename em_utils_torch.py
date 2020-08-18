@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from scipy.stats import ortho_group, norm
 import matplotlib
 matplotlib.use('Agg')
@@ -12,25 +13,36 @@ import pdb
 VERBOSE = 0
 SMALL = 1e-10
 EPS = 5e-7
+DTYPE = torch.DoubleTensor
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def init_params(D, K, mu_low, mu_up):
   # rotation matrix
   # TODO: which way to initialize?
   # A = ortho_group.rvs(D)
-  A = np.eye(D)
+  A = torch.eye(D)
   # prior - uniform
-  pi = np.ones([D, K]) / K
+  pi = torch.ones([D, K]) / K
   # GM means
-  mu = np.array([np.arange(mu_low, mu_up, (mu_up-mu_low)/K) for _ in range(D)])
+  mu = torch.tensor([np.arange(mu_low, mu_up, (mu_up-mu_low)/K) for _ in range(D)])
   # GM variances
-  sigma_sqr = np.ones([D, K])
-  print('A:', A.reshape(-1))
+  sigma_sqr = torch.ones([D, K])
+  print('A:', A.view(-1))
   print('mu: mean={} / std={}'.format(mu.mean(), mu.std()))
+
+  A = A.type(DTYPE).to(device)
+  pi = pi.type(DTYPE).to(device)
+  mu = mu.type(DTYPE).to(device)
+  sigma_sqr = sigma_sqr.type(DTYPE).to(device)
 
   return A, pi, mu, sigma_sqr
 
 
 def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
+  if type(X) is not torch.Tensor:
+    X = torch.tensor(X)
+  X = X.type(DTYPE).to(device)
+
   N, D = X.shape
   max_em_steps = 30
   n_gd_steps = 20
@@ -41,31 +53,34 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
   dA, dsigma_sqr = 10, 10
   while (not END(dA, dsigma_sqr)) and niters < max_em_steps:
     niters += 1
-    A_prev, sigma_sqr_prev = A.copy(), sigma_sqr.copy()
+    A_prev, sigma_sqr_prev = A.clone(), sigma_sqr.clone()
 
     def E(pi, mu, sigma_sqr):
       # E-step - update posterior counts
-      Y = A.dot(X.T) # D x N
+      Y = A.matmul(X.T) # D x N
 
-      diff_square = (Y.transpose(1,0).reshape(N, D, 1) - mu)**2
+      diff_square = (Y.T.view(N, D, 1) - mu)**2
       exponents = diff_square / sigma_sqr
-      exp = np.exp(-0.5 * exponents)
+      exp = torch.exp(-0.5 * exponents)
       w = exp * pi / (sigma_sqr**0.5)
-      Ksum = np.maximum(w.sum(-1, keepdims=1), SMALL)
+      Ksum = w.sum(-1, keepdim=True)
+      Ksum[Ksum<SMALL] = SMALL
       w = w / Ksum
 
-      w_sumN = np.maximum(w.sum(0), SMALL)
-      w_sumNK = np.maximum(w_sumN.sum(-1), SMALL)
+      w_sumN = w.sum(0)
+      w_sumNK = w_sumN.sum(-1)
+      w_sumN[w_sumN < SMALL] = SMALL
+      w_sumNK[w_sumNK < SMALL] = SMALL
       return Y, w, w_sumN, w_sumNK
 
     def update_pi_mu_sigma(X, A, w_sumN, w_sumNK):
-      Y = A.dot(X.T) # D x N
-      pi = w_sumN / w_sumNK.reshape(-1, 1)
-      mu = (Y.transpose(1,0).reshape(N, D, 1) * w).sum(0) / w_sumN
-      diff_square = (Y.transpose(1,0).reshape(N, D, 1) - mu)**2
+      Y = A.matmul(X.T) # D x N
+      pi = w_sumN / w_sumNK.view(-1, 1)
+      mu = (Y.T.view(N, D, 1) * w).sum(0) / w_sumN
+      diff_square = (Y.T.view(N, D, 1) - mu)**2
       sigma_sqr = (w * diff_square).sum(0) / w_sumN
-      mu[np.abs(mu) < SMALL] = SMALL 
-      sigma_sqr = np.maximum(sigma_sqr, SMALL)
+      mu[torch.abs(mu) < SMALL] = SMALL 
+      sigma_sqr[sigma_sqr < SMALL] = SMALL
       return pi, mu, sigma_sqr
 
     Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr)
@@ -73,28 +88,24 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
     # M-step
     if A_mode == 'GA': # gradient ascent
       for _ in range(n_gd_steps):
-        if VERBOSE: print(A.reshape(-1))
+        if VERBOSE: print(A.view(-1))
         
         if False: # TODO: should I update w per GD step?
           Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr)
 
-
         pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
 
-        Y = A.dot(X.T)
-        scaled = (-Y.T.reshape(N, D, 1) + mu) / sigma_sqr
-        weighted_X = (w * scaled).reshape(N, D, 1, K) * X.reshape(N, 1, D, 1)
+        Y = A.matmul(X.T)
+        scaled = (-Y.T.view(N, D, 1) + mu) / sigma_sqr
+        weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
         B = weighted_X.sum(0).sum(-1) / N
 
-        A += gamma * (np.linalg.inv(A).T + B)
-        _, ss, _ = np.linalg.svd(A)
-        A /= ss[0]
-
+        A += gamma * (torch.inverse(A).T + B)
 
     elif A_mode == 'CF': # closed form
       update_pi_mu_sigma()
 
-      if VERBOSE: print(A.reshape(-1))
+      if VERBOSE: print(A.view(-1))
       det = np.linalg.det(A)
       if np.abs(det) > 0.05:
         # invertible A: adjugate = det * inv.T
@@ -108,7 +119,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
       new_A = np.zeros_like(A)
       weights = w / sigma_sqr
       for i in range(D):
-        common_sums = A[i].reshape(-1, 1) * X.T # D x N
+        common_sums = A[i].view(-1, 1) * X.T # D x N
         total_sum = common_sums.sum(0)
         for j in range(D):
           j_common_sum = total_sum - common_sums[j]
@@ -136,23 +147,25 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
       A = new_A
             
     # difference from the previous iterate
-    dA, dsigma_sqr = np.linalg.norm(A - A_prev), np.linalg.norm(sigma_sqr.reshape(-1) - sigma_sqr_prev.reshape(-1))
+    dA, dsigma_sqr = torch.norm(A - A_prev), torch.norm(sigma_sqr.view(-1) - sigma_sqr_prev.view(-1))
 
   print('#{}: dA={:.3e} / dsigma_sqr={:.3e}'.format(niters, dA, dsigma_sqr))
-  print('A:', A.reshape(-1))
-  return A, pi, mu, sigma_sqr
+  print('A:', A.view(-1))
+  return X, A, pi, mu, sigma_sqr
 
 def gaussianize_1d(X, pi, mu, sigma_sqr):
    N, D = X.shape
 
-   scaled = (X.reshape(N, D, 1) - mu) / sigma_sqr**0.5
+   scaled = (X.view(N, D, 1) - mu) / sigma_sqr**0.5
+   scaled = scaled.cpu()
    cdf = norm.cdf(scaled)
-   cdf = np.maximum(cdf, EPS)
-   cdf=  np.minimum(cdf, 1 - EPS)
-   new_distr = (pi * cdf).sum(-1)
+   cdf[cdf<EPS] = EPS
+   cdf[cdf>1-EPS] = 1 - EPS
+   new_distr = (pi.cpu().numpy() * cdf).sum(-1)
    # new_distr = np.maximum(new_distr, EPS)
    # new_distr = np.minimum(new_distr, 1 - EPS)
    new_X = norm.ppf(new_distr)
+   new_X = torch.tensor(new_X).type(DTYPE).to(device)
    return new_X
 
 def eval_NLL(X):
@@ -174,12 +187,17 @@ def cof(A, i, j):
   return (-1)**(i+j) * np.linalg.det(Am)
 
 def plot_hist(data, fimg):
+  if type(data) is torch.Tensor:
+    data = data.cpu().numpy()
+
   plt.figure(figsize=[8,8])
   plt.hist2d(data[:,0], data[:,1], bins=[100,100])
   plt.xlim([-2.5, 2.5])
   plt.ylim([-2.5, 2.5])
   plt.savefig(fimg)
   plt.clf()
+  plt.close()
+
 
 def gen_data():
   dlen = 100000

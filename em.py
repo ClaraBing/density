@@ -1,11 +1,13 @@
 import os
 import numpy as np
+import torch
 from scipy.stats import ortho_group
 import argparse
 
 # from data import get_loader
 from data.dataset_mixture import GaussianMixture
-from em_utils import *
+# from em_utils_np import *
+from em_utils_torch import *
 
 import pdb
 
@@ -38,20 +40,21 @@ def fit(X, mu_low, mu_up, data_token=''):
   gammas = get_aranges(gamma_low, gamma_up, n_steps)
   threshs = get_aranges(1e-9, 1e-5, n_steps)
   A, pi, mu, sigma_sqr = init_params(D, K, mu_low, mu_up)
-  mu_id = np.random.choice(len(X), K, replace=False)
-  mu = X[mu_id].T
+  # mu_id = np.random.choice(len(X), K, replace=False)
+  # mu = X[mu_id].T
   print('Initial NLL:', eval_NLL(X))
   for i in range(n_steps):
     print('iteration', i)
     if A_mode == 'random':
       A = ortho_group.rvs(D)
     else:
-      A, pi, mu, sigma_sqr = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i], A_mode=A_mode)
+      X, A, pi, mu, sigma_sqr = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i], A_mode=A_mode)
     print('mu: mean={:.3e}/ std={:.3e}'.format(mu.mean(), mu.std()))
     print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
-    fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_iter{}_X.png'.format(data_token, A_mode, K, gamma_up, i)
-    plot_hist(X, fimg)
-    Y = X.dot(A.T)
+    if type(X) is torch.Tensor:
+      Y = X.matmul(A.T)
+    else:
+      Y = X.dot(A.T)
     fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_iter{}_Y.png'.format(data_token, A_mode, K, gamma_up, i)
     plot_hist(Y, fimg)
     print('NLL (Y):', eval_NLL(Y))
