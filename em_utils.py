@@ -42,22 +42,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
     def E(pi, mu, sigma_sqr):
       # E-step - update posterior counts
       Y = A.dot(X.T) # D x N
-      # w = np.zeros([N, D, K])
-      # diff_square = np.zeros([N, D, K])
-      # exponents = np.zeros([N, D, K])
-      # for d in range(D):
-      #   cur_y = Y[d]
-      #   for k in range(K):
-      #     diff_square[:, d, k] = (cur_y - mu[d,k])**2 
-      #     exponents[:, d, k] = diff_square[:, d, k] / np.maximum(sigma_sqr[d,k], SMALL)
-      #     w[:, d, k] = pi[d,k] * np.exp(-0.5*exponents[:, d, k]) / np.maximum(sigma_sqr[d,k]**0.5, SMALL)
-      #   Ksum = w[:, d].sum(-1)
-      #   if False:
-      #     mask_good = np.abs(Ksum) > 1e-3
-      #     mask_bad = np.abs(Ksum) <= 1e-3
-      #     w[:, d][mask_good] /= np.maximum(Ksum[mask_good].reshape(-1,1), SMALL)
-      #     w[:, d][mask_bad] = 1/K
-      #   w[:, d] /= np.maximum(Ksum.reshape(-1,1),  SMALL)
 
       diff_square = (Y.transpose(1,0).reshape(N, D, 1) - mu)**2
       exponents = diff_square / sigma_sqr
@@ -72,27 +56,11 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
 
     def update_intermediate(X, w, A):
       Y = A.dot(X.T) # D x N
-      # diff_square = np.zeros([N, D, K])
-      # exponents = np.zeros([N, D, K])
-      # for d in range(D):
-      #   cur_y = Y[d]
-      #   for k in range(K):
-      #     diff_square[:, d, k] = (cur_y - mu[d,k])**2 
-      #     exponents[:, d, k] = diff_square[:, d, k] / sigma_sqr[d,k]
       diff_square = (Y.transpose(1,0).reshape(N, D, 1) - mu)**2
       exponents = diff_square / sigma_sqr
       return Y, diff_square, exponents
 
     def update_pi_mu_sigma(Y, w_sumN, w_sumNK):
-      # global pi, mu, diff_square, sigma_sqr
-      # for d in range(D):
-      #   cur_y = Y[d]
-      #   for k in range(K):
-      #     pi[d,k] = w_sumN[d,k] / np.maximum(w_sumNK[d], SMALL)
-      #     mu[d,k] = w[:, d, k].dot(Y[d]) / np.maximum(w_sumN[d,k], SMALL)
-      #     diff_square[:, d, k] = (cur_y - mu[d,k])**2 
-      #     sigma_sqr[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / np.maximum(w_sumN[d,k], SMALL)
-
       pi = w_sumN / w_sumNK.reshape(-1, 1)
       mu = (Y.transpose(1,0).reshape(N, D, 1) * w).sum(0) / w_sumN
       diff_square = (Y.transpose(1,0).reshape(N, D, 1) - mu)**2
@@ -116,16 +84,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
           Y, diff_square, exponents = update_intermediate(X, w, A)
 
         pi, mu, diff_square, sigma_sqr = update_pi_mu_sigma(Y, w_sumN, w_sumNK)
-        # pdb.set_trace()
-    
-        # B = np.zeros([D, D])
-        # # weights = w * exponents
-        # for d in range(D):
-        #   for k in range(K):
-        #     scaled = (- Y[d] + mu[d,k]) / np.maximum(sigma_sqr[d,k], SMALL)
-        #     weighted_X = (w[:, d, k] * scaled).reshape(-1,1) * X
-        #     B[d] += weighted_X.sum(0)
-        # B /= N
 
         scaled = (-Y.T.reshape(N, D, 1) + mu) / sigma_sqr
         weighted_X = (w * scaled).reshape(N, D, 1, K) * X.reshape(N, 1, D, 1)
