@@ -1,5 +1,8 @@
 import numpy as np
 from scipy.stats import ortho_group, norm
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 # local imports
 from data.dataset_mixture import GaussianMixture
@@ -159,6 +162,14 @@ def cof(A, i, j):
   Am[:i, j:] = A[:i, j+1:]
   Am[i:, j:] = A[i+1:, j+1:]
   return (-1)**(i+j) * np.linalg.det(Am)
+
+def plot_hist(data, fimg):
+  plt.figure(figsize=[8,8])
+  plt.hist2d(data[:,0], data[:,1], bins=[100,100])
+  plt.xlim([-2.5, 2.5])
+  plt.ylim([-2.5, 2.5])
+  plt.savefig(fimg)
+  plt.clf()
 
 def gen_data():
   dlen = 100000
