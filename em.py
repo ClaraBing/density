@@ -21,11 +21,14 @@ parser.add_argument('--data', type=str, choices=[
        'normal', 'scaledNormal', 'rotatedNormal', 'ring',
        # disconnected
        'GM', 'GMn2', 'concentric'])
+parser.add_argument('--save-token', type=str, default='')
 args = parser.parse_args()
 
 
 def fit(X, mu_low, mu_up, data_token=''):
-  plt.hist2d(X[:,0], X[:,1], bins=[100,100])
+  # x = X.cpu().numpy()
+  x = X
+  plt.hist2d(x[:,0], x[:,1], bins=[100,100])
   plt.savefig('figs/hist2d_{}_init.png'.format(data_token))
   plt.clf()
 
@@ -52,7 +55,9 @@ def fit(X, mu_low, mu_up, data_token=''):
     X = gaussianize_1d(Y, pi, mu, sigma_sqr)
     print('NLL:', eval_NLL(X))
     print()
-    plt.hist2d(X[:,0], X[:,1], bins=[100,100])
+    # x = X.cpu().numpy()
+    x = X
+    plt.hist2d(x[:,0], x[:,1], bins=[100,100])
     plt.savefig('figs/hist2d_{}_mode{}_K{}_gamma{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, i))
     plt.clf()
 
@@ -83,7 +88,10 @@ if __name__ == '__main__':
   elif data_token == 'concentric':
     # 2 circles w/ radius 0.5 and 2. Each with 10k points.
     fdata = 'concentric.npy'
+  
+  data_token += args.save_token
 
   X = np.load(os.path.join(data_dir, fdata))
+  # X = torch.tensor(X)
   fit(X, mu_low, mu_up, data_token)
   
