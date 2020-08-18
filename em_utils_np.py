@@ -133,16 +133,17 @@ def plot_hist(data, fimg):
   plt.clf()
   plt.close()
 
-def gen_data(scale):
-  dlen = 100000
+def gen_data(dlen=100000, scale=4, token=''):
   dset = GaussianMixture(dlen, scale)
   data = []
   for _ in range(dlen):
     data += dset.__getitem__(0),
   data = np.array(data)
-  np.save('GM_2d_scale{}.npy'.format(scale), data)
+  np.save('GM_2d_scale{}{}.npy'.format(scale, token), data)
 
 if __name__ == '__main__':
-  scale = 2
-  gen_data(scale)
+  scale = 4
+  token = '_test'
+  dlen = 20000
+  gen_data(dlen, scale, token)
 

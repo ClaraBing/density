@@ -149,6 +149,9 @@ def plot_hist(data, fimg):
   plt.clf()
   plt.close()
 
+def to_tensor(data):
+  return torch.tensor(data).type(DTYPE).to(device)
+
 
 def gen_data(scale):
   dlen = 100000
