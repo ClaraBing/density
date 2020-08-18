@@ -12,7 +12,8 @@ SMALL = 1e-10
 def init_params(D, K, mu_low, mu_up):
   # rotation matrix
   # TODO: which way to initialize?
-  A = ortho_group.rvs(D)
+  # A = ortho_group.rvs(D)
+  A = np.eye(D)
   # prior - uniform
   pi = np.ones([D, K]) / K
   # GM means
@@ -38,54 +39,70 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
     niters += 1
     A_prev, sigma_sqr_prev = A.copy(), sigma_sqr.copy()
 
-    def E():
+    def E(pi, mu, sigma_sqr):
       # E-step - update posterior counts
-      w = np.zeros([N, D, K])
       Y = A.dot(X.T) # D x N
-      diff_square = np.zeros([N, D, K])
-      exponents = np.zeros([N, D, K])
-      for d in range(D):
-        cur_y = Y[d]
-        for k in range(K):
-          diff_square[:, d, k] = (cur_y - mu[d,k])**2 
-          if sigma_sqr[d,k] != 0:
-            exponents[:, d, k] = diff_square[:, d, k] / np.maximum(sigma_sqr[d,k], SMALL)
-            w[:, d, k] = pi[d,k] * np.exp(-0.5*exponents[:, d, k]) / np.maximum(sigma_sqr[d,k]**0.5, SMALL)
-        Ksum = w[:, d].sum(-1)
-        if False:
-          mask_good = np.abs(Ksum) > 1e-3
-          mask_bad = np.abs(Ksum) <= 1e-3
-          w[:, d][mask_good] /= np.maximum(Ksum[mask_good].reshape(-1,1), SMALL)
-          w[:, d][mask_bad] = 1/K
-        if True:
-          w[:, d] /= np.maximum(Ksum.reshape(-1,1),  SMALL)
-      w_sumN = w.sum(0)
-      w_sumNK = w_sumN.sum(-1)
+      # w = np.zeros([N, D, K])
+      # diff_square = np.zeros([N, D, K])
+      # exponents = np.zeros([N, D, K])
+      # for d in range(D):
+      #   cur_y = Y[d]
+      #   for k in range(K):
+      #     diff_square[:, d, k] = (cur_y - mu[d,k])**2 
+      #     exponents[:, d, k] = diff_square[:, d, k] / np.maximum(sigma_sqr[d,k], SMALL)
+      #     w[:, d, k] = pi[d,k] * np.exp(-0.5*exponents[:, d, k]) / np.maximum(sigma_sqr[d,k]**0.5, SMALL)
+      #   Ksum = w[:, d].sum(-1)
+      #   if False:
+      #     mask_good = np.abs(Ksum) > 1e-3
+      #     mask_bad = np.abs(Ksum) <= 1e-3
+      #     w[:, d][mask_good] /= np.maximum(Ksum[mask_good].reshape(-1,1), SMALL)
+      #     w[:, d][mask_bad] = 1/K
+      #   w[:, d] /= np.maximum(Ksum.reshape(-1,1),  SMALL)
+
+      diff_square = (Y.transpose(1,0).reshape(N, D, 1) - mu)**2
+      exponents = diff_square / sigma_sqr
+      exp = np.exp(-0.5 * exponents)
+      w = exp * pi / (sigma_sqr**0.5)
+      Ksum = w.sum(-1, keepdims=1)
+      w = w / Ksum
+
+      w_sumN = np.maximum(w.sum(0), SMALL)
+      w_sumNK = np.maximum(w_sumN.sum(-1), SMALL)
       return Y, w, w_sumN, w_sumNK, diff_square, exponents
 
     def update_intermediate(X, w, A):
       Y = A.dot(X.T) # D x N
-      diff_square = np.zeros([N, D, K])
-      exponents = np.zeros([N, D, K])
-      for d in range(D):
-        cur_y = Y[d]
-        for k in range(K):
-          diff_square[:, d, k] = (cur_y - mu[d,k])**2 
-          if sigma_sqr[d,k] != 0:
-            exponents[:, d, k] = diff_square[:, d, k] / np.maximum(sigma_sqr[d,k], SMALL)
+      # diff_square = np.zeros([N, D, K])
+      # exponents = np.zeros([N, D, K])
+      # for d in range(D):
+      #   cur_y = Y[d]
+      #   for k in range(K):
+      #     diff_square[:, d, k] = (cur_y - mu[d,k])**2 
+      #     exponents[:, d, k] = diff_square[:, d, k] / sigma_sqr[d,k]
+      diff_square = (Y.transpose(1,0).reshape(N, D, 1) - mu)**2
+      exponents = diff_square / sigma_sqr
       return Y, diff_square, exponents
 
-    def update_pi_mu_sigma():
-      for d in range(D):
-        cur_y = Y[d]
-        for k in range(K):
-          pi[d,k] = w_sumN[d,k] / np.maximum(w_sumNK[d], SMALL)
-          if w_sumN[d, k] != 0:
-            mu[d,k] = w[:, d, k].dot(Y[d]) / np.maximum(w_sumN[d,k], SMALL)
-            diff_square[:, d, k] = (cur_y - mu[d,k])**2 
-            sigma_sqr[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / np.maximum(w_sumN[d,k], SMALL)
+    def update_pi_mu_sigma(Y, w_sumN, w_sumNK):
+      # global pi, mu, diff_square, sigma_sqr
+      # for d in range(D):
+      #   cur_y = Y[d]
+      #   for k in range(K):
+      #     pi[d,k] = w_sumN[d,k] / np.maximum(w_sumNK[d], SMALL)
+      #     mu[d,k] = w[:, d, k].dot(Y[d]) / np.maximum(w_sumN[d,k], SMALL)
+      #     diff_square[:, d, k] = (cur_y - mu[d,k])**2 
+      #     sigma_sqr[d, k] = w[:, d, k].dot(diff_square[:, d, k]) / np.maximum(w_sumN[d,k], SMALL)
 
-    Y, w, w_sumN, w_sumNK, diff_square, exponents = E()
+      pi = w_sumN / w_sumNK.reshape(-1, 1)
+      mu = (Y.transpose(1,0).reshape(N, D, 1) * w).sum(0) / w_sumN
+      diff_square = (Y.transpose(1,0).reshape(N, D, 1) - mu)**2
+      sigma_sqr = (w * diff_square).sum(0) / w_sumN
+      mu = np.maximum(mu, SMALL)
+      diff_square = np.maximum(diff_square, SMALL)
+      sigma_sqr = np.maximum(sigma_sqr, SMALL)
+      return pi, mu, diff_square, sigma_sqr
+
+    Y, w, w_sumN, w_sumNK, diff_square, exponents = E(pi, mu, sigma_sqr)
 
     # M-step
     if A_mode == 'GA': # gradient ascent
@@ -93,22 +110,26 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
         if VERBOSE: print(A.reshape(-1))
         
         if False: # TODO: should I update w per GD step?
-          Y, w, w_sumN, w_sumNK, diff_square, exponents = E()
+          Y, w, w_sumN, w_sumNK, diff_square, exponents = E(pi, mu, sigma_sqr)
 
         if True:
           Y, diff_square, exponents = update_intermediate(X, w, A)
 
-        update_pi_mu_sigma()
+        pi, mu, diff_square, sigma_sqr = update_pi_mu_sigma(Y, w_sumN, w_sumNK)
         # pdb.set_trace()
     
-        B = np.zeros([D, D])
-        weights = w * exponents
-        for d in range(D):
-          for k in range(K):
-            scaled = (- Y[d] + mu[d,k]) / np.maximum(sigma_sqr[d,k], SMALL)
-            weighted_X = (w[:, d, k] * scaled).reshape(-1,1) * X
-            B[d] += weighted_X.sum(0)
-        B /= N
+        # B = np.zeros([D, D])
+        # # weights = w * exponents
+        # for d in range(D):
+        #   for k in range(K):
+        #     scaled = (- Y[d] + mu[d,k]) / np.maximum(sigma_sqr[d,k], SMALL)
+        #     weighted_X = (w[:, d, k] * scaled).reshape(-1,1) * X
+        #     B[d] += weighted_X.sum(0)
+        # B /= N
+
+        scaled = (-Y.T.reshape(N, D, 1) + mu) / sigma_sqr
+        weighted_X = (w * scaled).reshape(N, D, 1, K) * X.reshape(N, 1, D, 1)
+        B = weighted_X.sum(0).sum(-1) / N
 
         A += gamma * (np.linalg.inv(A).T + B)
 
