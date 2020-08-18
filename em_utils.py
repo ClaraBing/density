@@ -11,6 +11,7 @@ import pdb
 
 VERBOSE = 0
 SMALL = 1e-10
+EPS = 5e-7
 
 def init_params(D, K, mu_low, mu_up):
   # rotation matrix
@@ -31,7 +32,7 @@ def init_params(D, K, mu_low, mu_up):
 
 def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
   N, D = X.shape
-  max_em_steps = 50
+  max_em_steps = 20
   n_gd_steps = 10
 
   END = lambda dA, dsigma_sqr: (dA + dsigma_sqr) < threshold
@@ -77,8 +78,10 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
         if False: # TODO: should I update w per GD step?
           Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr)
 
+
         pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
 
+        Y = A.dot(X.T)
         scaled = (-Y.T.reshape(N, D, 1) + mu) / sigma_sqr
         weighted_X = (w * scaled).reshape(N, D, 1, K) * X.reshape(N, 1, D, 1)
         B = weighted_X.sum(0).sum(-1) / N
@@ -141,8 +144,12 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
 
    scaled = (X.reshape(N, D, 1) - mu) / sigma_sqr**0.5
    cdf = norm.cdf(scaled)
-   new_distr = pi * cdf
-   new_X = norm.ppf(new_distr.sum(-1))
+   cdf = np.maximum(cdf, EPS)
+   cdf=  np.minimum(cdf, 1 - EPS)
+   new_distr = (pi * cdf).sum(-1)
+   # new_distr = np.maximum(new_distr, EPS)
+   # new_distr = np.minimum(new_distr, 1 - EPS)
+   new_X = norm.ppf(new_distr)
    return new_X
 
 def eval_NLL(X):
