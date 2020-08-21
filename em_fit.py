@@ -156,10 +156,10 @@ def fit(X, mu_low, mu_up, data_token=''):
   np.save(os.path.join(args.save_dir, 'NLLs.npy'), np.array(NLLs))
   np.save(os.path.join(args.save_dir, 'grad_norms.npy'), np.array(grad_norms_total))
   plt.plot(NLLs)
-  plt.savefig(arsg.save_dir, 'NLL.png')
+  plt.savefig(args.save_dir, 'NLL.png')
   plt.close()
   plt.plot(grad_norms_total)
-  plt.savefig(arsg.save_dir, 'grad_norms.png')
+  plt.savefig(args.save_dir, 'grad_norms.png')
   plt.close()
 
 
