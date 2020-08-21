@@ -4,6 +4,7 @@ from scipy.stats import ortho_group, norm
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from time import time
 
 # local imports
 from data.dataset_mixture import GaussianMixture
@@ -11,6 +12,8 @@ from data.dataset_mixture import GaussianMixture
 import pdb
 
 VERBOSE = 0
+TIME = 1
+GRAD = 1
 SMALL = 1e-10
 EPS = 5e-7
 DTYPE = torch.DoubleTensor
@@ -27,8 +30,9 @@ def init_params(D, K, mu_low, mu_up):
   mu = torch.tensor([np.arange(mu_low, mu_up, (mu_up-mu_low)/K) for _ in range(D)])
   # GM variances
   sigma_sqr = torch.ones([D, K])
-  print('A:', A.view(-1))
-  print('mu: mean={} / std={}'.format(mu.mean(), mu.std()))
+  if VERBOSE:
+    print('A:', A.view(-1))
+    print('mu: mean={} / std={}'.format(mu.mean(), mu.std()))
 
   A = A.type(DTYPE).to(device)
   pi = pi.type(DTYPE).to(device)
@@ -38,19 +42,20 @@ def init_params(D, K, mu_low, mu_up):
   return A, pi, mu, sigma_sqr
 
 
-def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
+def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
+       max_em_steps=30, n_gd_steps=20):
   if type(X) is not torch.Tensor:
     X = torch.tensor(X)
   X = X.type(DTYPE).to(device)
 
   N, D = X.shape
-  max_em_steps = 30
-  n_gd_steps = 20
 
   END = lambda dA, dsigma_sqr: (dA + dsigma_sqr) < threshold
   
   niters = 0
   dA, dsigma_sqr = 10, 10
+  time_A, time_E, time_GA, time_Y = [], [], [], []
+  grad_norms = []
   while (not END(dA, dsigma_sqr)) and niters < max_em_steps:
     niters += 1
     A_prev, sigma_sqr_prev = A.clone(), sigma_sqr.clone()
@@ -83,11 +88,16 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
       sigma_sqr[sigma_sqr < SMALL] = SMALL
       return pi, mu, sigma_sqr
 
+    if TIME:
+      e_start = time()
     Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr)
+    if TIME:
+      time_E += time() - e_start,
 
     # M-step
     if A_mode == 'GA': # gradient ascent
-      for _ in range(n_gd_steps):
+      for i in range(n_gd_steps):
+        ga_start = time()
         if VERBOSE: print(A.view(-1))
         
         if False: # TODO: should I update w per GD step?
@@ -95,12 +105,26 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
 
         pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
 
+        if TIME:
+          y_start = time()
         Y = A.matmul(X.T)
+        if TIME:
+          time_Y += time() - y_start,
+
         scaled = (-Y.T.view(N, D, 1) + mu) / sigma_sqr
         weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
         B = weighted_X.sum(0).sum(-1) / N
 
-        A += gamma * (torch.inverse(A).T + B)
+        if TIME:
+          a_start = time()
+        grad = gamma * (torch.inverse(A).T + B)
+        A += grad
+        _, ss, _ = torch.svd(A)
+        A /= ss[0]
+        if TIME:
+          time_A += time() - a_start,
+          time_GA += time() - ga_start,
+        grad_norms += torch.norm(grad).item(),
 
     elif A_mode == 'CF': # closed form
       raise NotImplementedError("mode CF: not implemented yet.")
@@ -109,8 +133,18 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA'):
     dA, dsigma_sqr = torch.norm(A - A_prev), torch.norm(sigma_sqr.view(-1) - sigma_sqr_prev.view(-1))
 
   print('#{}: dA={:.3e} / dsigma_sqr={:.3e}'.format(niters, dA, dsigma_sqr))
-  print('A:', A.view(-1))
-  return X, A, pi, mu, sigma_sqr
+  if VERBOSE:
+    print('A:', A.view(-1))
+
+  avg_time = {}
+  if TIME:
+    avg_time = {
+      'A': np.array(time_A).mean(),
+      'E': np.array(time_E).mean(),
+      'GA': np.array(time_GA).mean(),
+      'Y': np.array(time_Y).mean(),
+    }
+  return X, A, pi, mu, sigma_sqr, grad_norms, avg_time 
 
 def gaussianize_1d(X, pi, mu, sigma_sqr):
    N, D = X.shape
