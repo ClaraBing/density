@@ -81,7 +81,7 @@ def fit(X, mu_low, mu_up, data_token=''):
         time_E += avg_time['E'],
         time_GA += avg_time['GA'],
         time_Y += avg_time['Y'],
-      grad_norms_total += np.array(grad_norms).mean,
+      grad_norms_total += np.array(grad_norms).mean(),
     print('mu: mean={:.3e}/ std={:.3e}'.format(mu.mean(), mu.std()))
     print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
     if type(X) is torch.Tensor:
@@ -156,10 +156,10 @@ def fit(X, mu_low, mu_up, data_token=''):
   np.save(os.path.join(args.save_dir, 'NLLs.npy'), np.array(NLLs))
   np.save(os.path.join(args.save_dir, 'grad_norms.npy'), np.array(grad_norms_total))
   plt.plot(NLLs)
-  plt.savefig(args.save_dir, 'NLL.png')
+  plt.savefig(os.path.join(args.save_dir, 'NLL.png'))
   plt.close()
   plt.plot(grad_norms_total)
-  plt.savefig(args.save_dir, 'grad_norms.png')
+  plt.savefig(os.path.join(args.save_dir, 'grad_norms.png'))
   plt.close()
 
 
