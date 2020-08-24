@@ -168,7 +168,8 @@ if __name__ == '__main__':
   # gen_data()
 
   data_dir = './datasets/EM'
-  args.save_dir = '{}_K{}_iter{}_em{}_gd{}'.format(args.data, args.K, args.n_steps, args.n_em, args.n_gd)
+  args.save_dir = '{}_K{}_iter{}_em{}_gd{}_gamma{}_gammaMin'.format(
+        args.data, args.K, args.n_steps, args.n_em, args.n_gd, args.gamma, args.gamma_min)
   if args.n_pts:
     args.save_dir += '_nPts{}'.format(args.n_pts)
   if args.save_token:
