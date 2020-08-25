@@ -10,11 +10,16 @@ from utils.rbig_util import *
 import args
 from data.get_loader import *
 
+from time import time
 import random
 import pdb
 
-SILENT = True
+SILENT = False
+VERBOSE = False
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+# device='cpu'
+
+TIME = 1
 
 args = args.TrainArgs().parse()
 
@@ -37,6 +42,8 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0):
   total = 0
   rotation_matrices = []
   FAIL_FLAG = False
+  time_keys = ['gen_bandwidth', 'gen_rotation', 'inverse_cdf', 'log_det', 'sampling', 'cur_data_proc', 'flow_loss']
+  times = {key:[] for key in time_keys}
   with torch.no_grad():
       data_anchors = [DATA]
       bandwidths = []
@@ -59,15 +66,22 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0):
           for prev_l in range(n_layer):
               # initialize rotation matrix
               if batch_idx == 0:
+                  if TIME:
+                    start = time()
                   bandwidth = generate_bandwidth(data_anchors[prev_l])
                   bandwidths.append(bandwidth)
-                  rotation_matrix = generate_orthogonal_matrix(data_anchors[prev_l], rot_type=args.rotation_type)
+                  if TIME:
+                    times['gen_bandwidth'] += time() - start,
+                    start = time()
+                  rotation_matrix, Y = generate_orthogonal_matrix(data_anchors[prev_l], rot_type=args.rotation_type)
                   if rotation_matrix is None:
                     print('Failed')
                     FAIL_FLAG = True
                     break
                   # print('Succ')
                   rotation_matrices.append(rotation_matrix.to(device))
+                  if TIME:
+                    times['gen_rotation'] += time() - start,
                   vector = 2 * (torch.rand((1, data.shape[-1])) - 0.5).to(device)
                   vectors.append(vector)
 
@@ -75,10 +89,17 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0):
                 bandwidth = bandwidth.type(data.dtype)
 
               # inverse CDF
+              if TIME:
+                start = time()
               inverse_l, cdf_mask, [log_cdf_l, cdf_mask_left], [log_sf_l, cdf_mask_right] \
                   = logistic_inverse_normal_cdf(data, bandwidth=bandwidth, datapoints=data_anchors[prev_l])
+              if TIME:
+                times['inverse_cdf'] += time() - start,
+                start = time()
               log_det += compute_log_det(data, inverse_l, data_anchors[prev_l], cdf_mask,
                                                log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right, h=bandwidth)
+              if TIME:
+                times['log_det'] += time() - start,
               # rotation
               data = torch.mm(inverse_l, rotation_matrices[prev_l])
 
@@ -87,23 +108,35 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0):
                   cur_data = data_anchors[prev_l]
                   update_data_arrays = []
                   assert (total_datapoints % process_size == 0), "Process_size does not divide total_datapoints!"
+                  if TIME:
+                    proc_start = time()
                   for b in range(total_datapoints // process_size):
-                      if not SILENT and b % 20 == 0:
+                      if VERBOSE and b % 20 == 0:
                           print("Layer {0} generating new datapoints: {1}/{2}".format(prev_l, b,
                                                                                       total_datapoints // process_size))
                       cur_data_batch = cur_data[process_size * b: process_size * (b + 1), :]
                       # inverse CDF
+                      if TIME:
+                        start = time()
                       inverse_data, _, _, _ = logistic_inverse_normal_cdf(cur_data_batch, bandwidth=bandwidth,
                                                                        datapoints=data_anchors[prev_l])
+                      if TIME:
+                        times['inverse_cdf'] += time() - start,
                       # rotation
                       cur_data_batch = torch.mm(inverse_data, rotation_matrices[prev_l])
 
                       update_data_arrays.append(cur_data_batch)
+                  if TIME:
+                    times['cur_data_proc'] += time() - proc_start,
                   cur_data = torch.cat(update_data_arrays, dim=0)
                   data_anchors.append(cur_data[:cur_data.shape[0]])
 
           if not FAIL_FLAG:
+            if TIME:
+              start = time()
             val_loss_r = flow_loss(data, log_det)
+            if TIME:
+              times['flow_loss'] += time() - start,
             test_bpd_r = (val_loss_r.item() * data.shape[0] - log_det_logit) * (
                     1 / (np.log(2) * np.prod(data.shape))) + 8
 
@@ -120,6 +153,8 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0):
       if not SILENT:
         print("Total loss {} bpd {}".format(val_loss / total, test_bpd / total))
 
+      if TIME:
+        start = time()
       if args.dataset in ['GaussianLine', 'GaussianMixture', 'uniform']:
         sampling(rotation_matrices, data_anchors.copy(), bandwidths.copy(),
                  image_name='images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(args.dataset, args.rotation_type, args.n_layer, n_run),
@@ -128,6 +163,8 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0):
         sampling(rotation_matrices, data_anchors, bandwidths,
                  image_name='images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(args.dataset, args.rotation_type, args.n_layer, n_run),
                  channel=channel, image_size=image_size, process_size=10)
+      if TIME:
+        times['sampling'] += time() - start,
 
       if len(rotation_matrices) > 0:
         rotation_matrices = torch.stack(rotation_matrices, 0)
@@ -136,6 +173,10 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0):
         os.makedirs(out_dir, exist_ok=True)
         fname = os.path.join(out_dir, 'rotMtrx_{}_layer{}_run{}.npy'.format(args.rotation_type, args.n_layer, n_run))
         np.save(fname, rotation_matrices)
+
+      for key in time_keys:
+        times[key] = np.array(times[key])
+        print('{}: mean={:.3e} / std={:.3e}'.format(key, times[key].mean(), times[key].std()))
       return val_loss / total, test_bpd / total
 
 if __name__ == '__main__':
@@ -157,8 +198,9 @@ if __name__ == '__main__':
   normal_distribution = tdist.Normal(0, 1)
 
   means, stds = [], []
-  n_layers = list(range(20))
-  n_layers = range(10)
+  # n_layers = list(range(20))
+  # n_layers = range(10)
+  n_layers = [10]
   for n_layer in n_layers:
     args.n_layer = n_layer
     args.bt = total_datapoints
