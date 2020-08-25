@@ -219,6 +219,8 @@ def sampling(rotation_matrices, data_anchors, bandwidths, image_name='RBIG_sampl
 def generate_orthogonal_matrix(data_anchor, rot_type="PCA", verbose=False):
     if verbose:
       print("Generating {} matrix.".format(type))
+
+    Y = None
     if rot_type == "random":
       # Random orthogonal matrix
       random_mat = torch.randn(data_anchor.shape[-1], data_anchor.shape[-1])
@@ -230,24 +232,26 @@ def generate_orthogonal_matrix(data_anchor, rot_type="PCA", verbose=False):
       rotation_matrix = rotation_matrix.float()
     elif rot_type == 'ICA':
       # NOTE: FastICA is extremely slow for high dim data and may not converge.
-      cov = torch.mm(data_anchor.permute(1, 0), data_anchor)
-      cov /= len(data_anchor)
+      ica = FastICA()
+
       cnt = 0
       n_tries = 20
       while cnt < n_tries:
         # multiple
         try:
-          rotation_matrix = FastICA().fit_transform(cov.cpu())
+          Y = ica.fit_transform(data_anchor.cpu())
+          rotation_matrix = np.linalg.inv(ica.mixing_)
+          rotation_matrix = torch.tensor(rotation_matrix).float().to(device)
           cnt = 2*n_tries
         except:
           cnt += 1
-      if cnt != n_tries:
+      if cnt == 2*n_tries:
         rotation_matrix = torch.tensor(rotation_matrix).float()
       else:
         rotation_matrix = None
     if verbose:
       print("{} matrix generated!".format(type))
-    return rotation_matrix
+    return rotation_matrix, Y
 
 def dequantization(data, lambd):
   """
