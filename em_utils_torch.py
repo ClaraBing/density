@@ -65,9 +65,10 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
     niters += 1
     A_prev, sigma_sqr_prev = A.clone(), sigma_sqr.clone()
 
-    def E(pi, mu, sigma_sqr):
+    def E(pi, mu, sigma_sqr, Y=None):
       # E-step - update posterior counts
-      Y = A.matmul(X.T) # D x N
+      if Y is None:
+        Y = A.matmul(X.T) # D x N
 
       diff_square = (Y.T.view(N, D, 1) - mu)**2
       exponents = diff_square / sigma_sqr
@@ -152,8 +153,14 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         print('ICA failed. Use random.')
         A = to_tensor(ortho_group.rvs(D))
         Y = A.matmul(X)
+
+      # NOTE: passing in Y as an argument since A is not explicitly calculated.
+      Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr, Y=Y)
       pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK, Y=Y)
+      
+      # NOTE: returning directly since no EM iteration is required.
       return Y.T, A, pi, mu, sigma_sqr, avg_time
+
     elif A_mode == 'CF': # closed form
       raise NotImplementedError("mode CF: not implemented yet.")
            
