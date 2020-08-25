@@ -4,6 +4,11 @@ from scipy.stats import ortho_group, norm
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from sklearn.decomposition import FastICA
+from warnings import simplefilter
+from sklearn.exceptions import ConvergenceWarning
+simplefilter("ignore", category=ConvergenceWarning)
+
 from time import time
 
 # local imports
@@ -12,8 +17,7 @@ from data.dataset_mixture import GaussianMixture
 import pdb
 
 VERBOSE = 0
-TIME = 1
-GRAD = 1
+TIME = 0
 SMALL = 1e-10
 EPS = 5e-7
 DTYPE = torch.DoubleTensor
@@ -54,6 +58,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
   
   niters = 0
   dA, dsigma_sqr = 10, 10
+  avg_time = {}
   time_A, time_E, time_GA, time_Y = [], [], [], []
   grad_norms = []
   while (not END(dA, dsigma_sqr)) and niters < max_em_steps:
@@ -78,8 +83,9 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
       w_sumNK[w_sumNK < SMALL] = SMALL
       return Y, w, w_sumN, w_sumNK
 
-    def update_pi_mu_sigma(X, A, w_sumN, w_sumNK):
-      Y = A.matmul(X.T) # D x N
+    def update_pi_mu_sigma(X, A, w_sumN, w_sumNK, Y=None):
+      if Y is None:
+        Y = A.matmul(X.T) # D x N
       pi = w_sumN / w_sumNK.view(-1, 1)
       mu = (Y.T.view(N, D, 1) * w).sum(0) / w_sumN
       diff_square = (Y.T.view(N, D, 1) - mu)**2
@@ -126,6 +132,28 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
           time_GA += time() - ga_start,
         grad_norms += torch.norm(grad).item(),
 
+    elif A_mode == 'ICA':
+      # pdb.set_trace()
+      cov = X.T.matmul(X) / len(X)
+      cnt = 0
+      n_tries = 20
+      while cnt < n_tries:
+        # multiple
+        try:
+          ica = FastICA()
+          Y = ica.fit_transform(X.cpu())
+          Y = to_tensor(Y).T
+          _, ss, _ = np.linalg.svd(ica.mixing_)
+          cnt = 2*n_tries
+          Y *= ss[0]
+        except:
+          cnt += 1
+      if cnt != 2*n_tries:
+        print('ICA failed. Use random.')
+        A = to_tensor(ortho_group.rvs(D))
+        Y = A.matmul(X)
+      pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK, Y=Y)
+      return Y.T, A, pi, mu, sigma_sqr, avg_time
     elif A_mode == 'CF': # closed form
       raise NotImplementedError("mode CF: not implemented yet.")
            
@@ -136,7 +164,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
   if VERBOSE:
     print('A:', A.view(-1))
 
-  avg_time = {}
   if TIME:
     avg_time = {
       'A': np.array(time_A).mean(),
@@ -169,6 +196,8 @@ def eval_NLL(X):
   return 0.5 * X.shape[1] * np.log(2*np.pi) + exponents.mean()
 
 def get_aranges(low, up, n_steps):
+  if low == up:
+    return np.array([low] * n_steps)
   return np.arange(low, up, (up-low)/n_steps)[::-1]
 
 def plot_hist(data, fimg):

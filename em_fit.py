@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 import pdb
 
-TIME = 1
+TIME = 0
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lib', type=str, default='torch', choices=['np', 'torch'])
@@ -21,7 +21,7 @@ parser.add_argument('--gamma-min', type=float, default=0.001)
 parser.add_argument('--n-steps', type=int, default=50)
 parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
-parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'CF'])
+parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'CF', 'ICA'])
 parser.add_argument('--data', type=str, default='GM', choices=[
        # connected
        'normal', 'scaledNormal', 'rotatedNormal', 'ring',
@@ -68,26 +68,31 @@ def fit(X, mu_low, mu_up, data_token=''):
   for i in range(n_steps):
     iter_start = time()
     print('iteration', i)
-    if A_mode == 'random':
-      A = ortho_group.rvs(D)
-    else:
-      if TIME:
-        em_start = time()
-      X, A, pi, mu, sigma_sqr, grad_norms, avg_time = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
+    if A_mode == 'ICA':
+      Y, A, pi, mu, sigma_sqr, avg_time = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
                 A_mode=A_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
-      if TIME:
-        time_em += time() - em_start,
-        time_A += avg_time['A'],
-        time_E += avg_time['E'],
-        time_GA += avg_time['GA'],
-        time_Y += avg_time['Y'],
-      grad_norms_total += np.array(grad_norms).mean(),
+    else:
+      if A_mode == 'random':
+        A = ortho_group.rvs(D)
+      else:
+        if TIME:
+          em_start = time()
+        X, A, pi, mu, sigma_sqr, grad_norms, avg_time = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
+                  A_mode=A_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
+        if TIME:
+          time_em += time() - em_start,
+          time_A += avg_time['A'],
+          time_E += avg_time['E'],
+          time_GA += avg_time['GA'],
+          time_Y += avg_time['Y'],
+        if args.mode == 'GA':
+          grad_norms_total += np.array(grad_norms).mean(),
+      if type(X) is torch.Tensor:
+        Y = X.matmul(A.T)
+      else:
+        Y = X.dot(A.T)
     print('mu: mean={:.3e}/ std={:.3e}'.format(mu.mean(), mu.std()))
     print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
-    if type(X) is torch.Tensor:
-      Y = X.matmul(A.T)
-    else:
-      Y = X.dot(A.T)
     fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}_Y.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)
     plot_hist(Y, fimg)
@@ -154,13 +159,14 @@ def fit(X, mu_low, mu_up, data_token=''):
     np.save(os.path.join(args.save_dir, 'time_NLL.npy'), np.array(time_NLL))
     np.save(os.path.join(args.save_dir, 'time_save.npy'), np.array(time_save))
   np.save(os.path.join(args.save_dir, 'NLLs.npy'), np.array(NLLs))
-  np.save(os.path.join(args.save_dir, 'grad_norms.npy'), np.array(grad_norms_total))
   plt.plot(NLLs)
-  plt.savefig(os.path.join(args.save_dir, 'NLL.png'))
+  plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL.png'))
   plt.close()
-  plt.plot(grad_norms_total)
-  plt.savefig(os.path.join(args.save_dir, 'grad_norms.png'))
-  plt.close()
+  if args.mode == 'GA':
+    np.save(os.path.join(args.save_dir, 'grad_norms.npy'), np.array(grad_norms_total))
+    plt.plot(grad_norms_total)
+    plt.savefig(os.path.join(args.save_dir, 'figs', 'grad_norms.png'))
+    plt.close()
 
 
 if __name__ == '__main__':
@@ -168,8 +174,8 @@ if __name__ == '__main__':
   # gen_data()
 
   data_dir = './datasets/EM'
-  args.save_dir = '{}_K{}_iter{}_em{}_gd{}_gamma{}_gammaMin'.format(
-        args.data, args.K, args.n_steps, args.n_em, args.n_gd, args.gamma, args.gamma_min)
+  args.save_dir = '{}_mode{}_K{}_iter{}_em{}_gd{}{}'.format(
+        args.data, args.mode, args.K, args.n_steps, args.n_em, args.n_gd, '_gamma{}_gammaMin{}'.format(args.gamma, args.gamma_min) if args.mode == 'GA' else '')
   if args.n_pts:
     args.save_dir += '_nPts{}'.format(args.n_pts)
   if args.save_token:
