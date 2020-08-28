@@ -142,8 +142,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         if TIME:
           a_start = time()
         grad = gamma * (torch.inverse(A).T + B)
-        # A += grad
-        A -= grad
+        A += grad
         _, ss, _ = torch.svd(A)
         A /= ss[0]
         if TIME:
