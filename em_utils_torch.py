@@ -22,6 +22,7 @@ CHECK_OBJ = 1
 
 SMALL = 1e-10
 EPS = 5e-7
+EPS_GRAD = 1e-2
 
 DTYPE = torch.DoubleTensor
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -129,20 +130,33 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
 
         pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
 
-        if TIME:
-          y_start = time()
-        Y = A.matmul(X.T)
-        if TIME:
-          time_Y += time() - y_start,
+        def get_grad(X, A, w, mu, sigma_sqr):
+          if TIME:
+            y_start = time()
+          Y = A.matmul(X.T)
+          if TIME:
+            time_Y += time() - y_start,
 
-        scaled = (-Y.T.view(N, D, 1) + mu) / sigma_sqr
-        weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
-        B = weighted_X.sum(0).sum(-1) / N
+          scaled = (-Y.T.view(N, D, 1) + mu) / sigma_sqr
+          weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
+          B = weighted_X.sum(0).sum(-1) / N
+          grad = torch.inverse(A).T + B
+          return grad
 
         if TIME:
           a_start = time()
-        grad = gamma * (torch.inverse(A).T + B)
-        A += grad
+        # grad = torch.inverse(A).T + B
+        grad = get_grad(X, A, w, mu, sigma_sqr)
+
+        if gamma == 0: # perturb
+          perturb = A.std() * 0.1 * torch.randn(A.shape).type(DTYPE).to(device)
+          perturbed = A + perturb
+          perturbed_grad = get_grad(X, perturbed, w, mu, sigma_sqr)
+
+          grad_diff = torch.norm(grad - perturbed_grad)
+          gamma = 1 /(EPS_GRAD + grad_diff) * 0.05
+
+        A += gamma * grad
         _, ss, _ = torch.svd(A)
         A /= ss[0]
         if TIME:
