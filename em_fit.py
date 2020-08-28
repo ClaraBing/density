@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import pdb
 
 TIME = 0
+CHECK_OBJ = 1
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lib', type=str, default='torch', choices=['np', 'torch'])
@@ -77,7 +78,7 @@ def fit(X, mu_low, mu_up, data_token=''):
       else:
         if TIME:
           em_start = time()
-        X, A, pi, mu, sigma_sqr, grad_norms, avg_time = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
+        X, A, pi, mu, sigma_sqr, grad_norms, objs, avg_time = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
                   A_mode=A_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
         if TIME:
           time_em += time() - em_start,
@@ -93,6 +94,14 @@ def fit(X, mu_low, mu_up, data_token=''):
         Y = X.dot(A.T)
     print('mu: mean={:.3e}/ std={:.3e}'.format(mu.mean(), mu.std()))
     print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
+    if CHECK_OBJ:
+      for emi, obj in enumerate(objs):
+        fimg = 'figs/objs_step{}_em{}.png'.format(i, emi)
+        fimg = os.path.join(args.save_dir, fimg)
+        plt.plot(obj)
+        plt.savefig(fimg)
+        plt.close()
+
     fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}_Y.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)
     plot_hist(Y, fimg)

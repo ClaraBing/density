@@ -18,8 +18,11 @@ import pdb
 
 VERBOSE = 0
 TIME = 0
+CHECK_OBJ = 1
+
 SMALL = 1e-10
 EPS = 5e-7
+
 DTYPE = torch.DoubleTensor
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -61,9 +64,11 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
   avg_time = {}
   time_A, time_E, time_GA, time_Y = [], [], [], []
   grad_norms = []
+  objs = []
   while (not END(dA, dsigma_sqr)) and niters < max_em_steps:
     niters += 1
     A_prev, sigma_sqr_prev = A.clone(), sigma_sqr.clone()
+    objs += [],
 
     def E(pi, mu, sigma_sqr, Y=None):
       # E-step - update posterior counts
@@ -95,6 +100,16 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
       sigma_sqr[sigma_sqr < SMALL] = SMALL
       return pi, mu, sigma_sqr
 
+    def get_objetive(X, A, pi, mu, sigma_sqr, w, Y=None):
+      if Y is None:
+        Y = A.matmul(X.T)
+      Y = Y.T
+      exponents = (Y.view(N, D, 1) - mu)**2 / sigma_sqr
+      exp = torch.exp(-0.5 * exponents) / (2*np.pi)**(D/2)
+      log = torch.log(exp * pi)
+      obj = (w * log).sum() / N + torch.log(torch.abs(torch.det(A)))
+      return obj
+
     if TIME:
       e_start = time()
     Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr)
@@ -103,6 +118,8 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
 
     # M-step
     if A_mode == 'GA': # gradient ascent
+      if CHECK_OBJ:
+        objs[-1] += get_objetive(X, A, pi, mu, sigma_sqr, w),
       for i in range(n_gd_steps):
         ga_start = time()
         if VERBOSE: print(A.view(-1))
@@ -125,13 +142,19 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         if TIME:
           a_start = time()
         grad = gamma * (torch.inverse(A).T + B)
-        A += grad
+        # A += grad
+        A -= grad
         _, ss, _ = torch.svd(A)
         A /= ss[0]
         if TIME:
           time_A += time() - a_start,
           time_GA += time() - ga_start,
         grad_norms += torch.norm(grad).item(),
+
+        if CHECK_OBJ:
+          obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+          objs[-1] += obj,
+          print('iter {}: obj= {:.5f}'.format(i, obj))
 
     elif A_mode == 'ICA':
       # pdb.set_trace()
@@ -178,7 +201,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
       'GA': np.array(time_GA).mean(),
       'Y': np.array(time_Y).mean(),
     }
-  return X, A, pi, mu, sigma_sqr, grad_norms, avg_time 
+  return X, A, pi, mu, sigma_sqr, grad_norms, objs, avg_time 
 
 def gaussianize_1d(X, pi, mu, sigma_sqr):
    N, D = X.shape
@@ -186,13 +209,13 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
    scaled = (X.view(N, D, 1) - mu) / sigma_sqr**0.5
    scaled = scaled.cpu()
    cdf = norm.cdf(scaled)
+   # remove outliers 
    cdf[cdf<EPS] = EPS
    cdf[cdf>1-EPS] = 1 - EPS
+
    new_distr = (pi.cpu().numpy() * cdf).sum(-1)
-   # new_distr = np.maximum(new_distr, EPS)
-   # new_distr = np.minimum(new_distr, 1 - EPS)
    new_X = norm.ppf(new_distr)
-   new_X = torch.tensor(new_X).type(DTYPE).to(device)
+   new_X = to_tensor(new_X)
    return new_X
 
 def eval_NLL(X):
