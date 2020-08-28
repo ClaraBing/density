@@ -17,8 +17,8 @@ from data.dataset_mixture import GaussianMixture
 import pdb
 
 VERBOSE = 0
-TIME = 0
-CHECK_OBJ = 1
+TIME = 1
+CHECK_OBJ = 0
 
 SMALL = 1e-10
 EPS = 5e-7
@@ -109,6 +109,9 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
       exp = torch.exp(-0.5 * exponents) / (2*np.pi)**(D/2)
       log = torch.log(exp * pi)
       obj = (w * log).sum() / N + torch.log(torch.abs(torch.det(A)))
+      if torch.isnan(obj):
+        print('objective is NaN.') 
+        pdb.set_trace()
       return obj
 
     if TIME:
@@ -135,23 +138,27 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
             y_start = time()
           Y = A.matmul(X.T)
           if TIME:
-            time_Y += time() - y_start,
+            y_time = time() - y_start
+          else:
+            y_time = 0
 
           scaled = (-Y.T.view(N, D, 1) + mu) / sigma_sqr
           weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
           B = weighted_X.sum(0).sum(-1) / N
           grad = torch.inverse(A).T + B
-          return grad
+          return grad, y_time
 
         if TIME:
           a_start = time()
         # grad = torch.inverse(A).T + B
-        grad = get_grad(X, A, w, mu, sigma_sqr)
+        grad, y_time = get_grad(X, A, w, mu, sigma_sqr)
+        if TIME:
+          time_Y += y_time,
 
         if gamma == 0: # perturb
           perturb = A.std() * 0.1 * torch.randn(A.shape).type(DTYPE).to(device)
           perturbed = A + perturb
-          perturbed_grad = get_grad(X, perturbed, w, mu, sigma_sqr)
+          perturbed_grad, _ = get_grad(X, perturbed, w, mu, sigma_sqr)
 
           grad_diff = torch.norm(grad - perturbed_grad)
           gamma = 1 /(EPS_GRAD + grad_diff) * 0.05
