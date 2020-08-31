@@ -17,7 +17,7 @@ from data.dataset_mixture import GaussianMixture
 import pdb
 
 VERBOSE = 0
-TIME = 1
+TIME = 0
 CHECK_OBJ = 0
 
 SMALL = 1e-10
@@ -243,7 +243,37 @@ def eval_NLL(X):
   exponents = 0.5 * (X**2).sum(1)
   if exponents.max() > 10:
     print("NLL: exponents large.")
-  return 0.5 * X.shape[1] * np.log(2*np.pi) + exponents.mean()
+  NLL = 0.5 * X.shape[1] * np.log(2*np.pi) + exponents.mean()
+  return NLL.item()
+
+def eval_KL(X, pi, mu, sigma_sqr):
+  N, D = X.shape
+  exponents_normal = -0.5 * (X**2).sum(1)
+  log_prob_normal = -0.5 * D * np.log(2*np.pi) + exponents_normal
+  prob_normal = torch.exp(log_prob_normal)
+  prob_normal /= prob_normal.sum()
+  log_prob_normal = torch.log(prob_normal)
+
+  # uncomment the following two lines for sanity check w/ std normal
+  # mu = torch.zeros_like(mu).to(device)
+  # sigma_sqr = torch.ones_like(sigma_sqr).to(device)
+
+  exponents = - (X.view(N, D, 1) - mu)**2 / (2 * sigma_sqr)
+  prob = pi * (2*np.pi*sigma_sqr)**(-0.5) * torch.exp(exponents)
+  prob = prob.sum(-1) # shape: N x D
+  log_prob_curr = torch.log(prob).sum(-1)
+  prob = torch.exp(log_prob_curr)
+  prob /= prob.sum()
+  log_prob_curr = torch.log(prob)
+
+  KL = (prob * (log_prob_curr - log_prob_normal)).sum().item()
+  if KL < 0:
+    print('ERROR: negative value of KL.')
+    pdb.set_trace()
+  return KL
+
+  # prob = torch.exp(-0.5 * exponents) * pi / (sigma_sqr**0.5)
+  # log_prob_curr = torch.log(prob)
 
 def get_aranges(low, up, n_steps):
   if low == up:

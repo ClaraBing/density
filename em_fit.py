@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import pdb
 
 TIME = 0
-CHECK_OBJ = 1
+CHECK_OBJ = 0
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lib', type=str, default='torch', choices=['np', 'torch'])
@@ -45,6 +45,8 @@ def fit(X, mu_low, mu_up, data_token=''):
   fimg = os.path.join(args.save_dir, fimg)
   plot_hist(x, fimg)
 
+  if args.lib == 'torch':
+    X = to_tensor(X)
   A_mode = args.mode
   D = X.shape[1]
   K = args.K
@@ -53,10 +55,13 @@ def fit(X, mu_low, mu_up, data_token=''):
   gammas = get_aranges(gamma_low, gamma_up, n_steps)
   threshs = get_aranges(1e-9, 1e-5, n_steps)
   A, pi, mu, sigma_sqr = init_params(D, K, mu_low, mu_up)
-  NLLs = []
+  NLLs, KLs = [], []
   nll = eval_NLL(X)
   NLLs += nll,
+  kl = eval_KL(X, pi, mu, sigma_sqr)
+  KLs += kl,
   print('Initial NLL:', nll)
+  print('Inital KL:', kl)
 
   grad_norms_total = []
   if TIME:
@@ -96,7 +101,7 @@ def fit(X, mu_low, mu_up, data_token=''):
     print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
     if CHECK_OBJ:
       for emi, obj in enumerate(objs):
-        fimg = 'figs/objs_step{}_em{}.png'.format(i, emi)
+        fimg = 'figs/objs/objs_step{}_em{}.png'.format(i, emi)
         fimg = os.path.join(args.save_dir, fimg)
         plt.plot(obj)
         plt.savefig(fimg)
@@ -108,9 +113,11 @@ def fit(X, mu_low, mu_up, data_token=''):
     if TIME:
       nll_start = time()
     nll = eval_NLL(Y)
+    kl = eval_KL(Y, pi, mu, sigma_sqr)
     if TIME:
       time_NLL += time() - nll_start,
     print('NLL (Y):', nll)
+    print('KL (Y):', kl)
 
     if TIME:
       g1d_start = time()
@@ -121,10 +128,13 @@ def fit(X, mu_low, mu_up, data_token=''):
     if TIME:
       nll_start = time()
     nll = eval_NLL(X)
+    kl = eval_KL(X, pi, mu, sigma_sqr)
     if TIME:
       time_NLL += time() - nll_start,
     NLLs += nll,
+    KLs += kl,
     print('NLL:', nll)
+    print('KL:', kl)
     print()
     x = X
     fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
@@ -171,6 +181,10 @@ def fit(X, mu_low, mu_up, data_token=''):
   plt.plot(NLLs)
   plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL.png'))
   plt.close()
+  np.save(os.path.join(args.save_dir, 'KLs.npy'), np.array(NLLs))
+  plt.plot(NLLs)
+  plt.savefig(os.path.join(args.save_dir, 'figs', 'KL.png'))
+  plt.close()
   if args.mode == 'GA':
     np.save(os.path.join(args.save_dir, 'grad_norms.npy'), np.array(grad_norms_total))
     plt.plot(grad_norms_total)
@@ -192,6 +206,8 @@ if __name__ == '__main__':
   args.save_dir = os.path.join(SAVE_ROOT, args.save_dir)
   os.makedirs(os.path.join(args.save_dir), exist_ok=True)
   os.makedirs(os.path.join(args.save_dir, 'figs'), exist_ok=True)
+  if CHECK_OBJ:
+    os.makedirs(os.path.join(args.save_dir, 'figs', 'objs'), exist_ok=True)  
 
   data_token = args.data
   mu_low, mu_up = -2, 2
