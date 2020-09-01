@@ -17,8 +17,8 @@ from data.dataset_mixture import GaussianMixture
 import pdb
 
 VERBOSE = 0
-TIME = 0
-CHECK_OBJ = 0
+TIME = 1
+CHECK_OBJ = 1
 
 SMALL = 1e-10
 EPS = 5e-7
@@ -106,9 +106,11 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         Y = A.matmul(X.T)
       Y = Y.T
       exponents = (Y.view(N, D, 1) - mu)**2 / sigma_sqr
-      exp = torch.exp(-0.5 * exponents) / (2*np.pi)**(D/2)
-      log = torch.log(exp * pi)
-      obj = (w * log).sum() / N + torch.log(torch.abs(torch.det(A)))
+      exp = torch.exp(-0.5 * exponents) / (2*np.pi * sigma_sqr)**(1/2)
+      prob = (exp * pi).sum(-1)
+      log = torch.log(prob) 
+      log[prob == 0] = 0 # mask out NaN
+      obj = log.sum() / N + torch.log(torch.abs(torch.det(A)))
       if torch.isnan(obj):
         print('objective is NaN.') 
         pdb.set_trace()
@@ -174,7 +176,8 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         if CHECK_OBJ:
           obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
           objs[-1] += obj,
-          print('iter {}: obj= {:.5f}'.format(i, obj))
+          if VERBOSE:
+            print('iter {}: obj= {:.5f}'.format(i, obj))
 
     elif A_mode == 'ICA':
       # pdb.set_trace()
