@@ -10,9 +10,6 @@ import matplotlib.pyplot as plt
 
 import pdb
 
-TIME = 0
-CHECK_OBJ = 0
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--lib', type=str, default='torch', choices=['np', 'torch'])
 parser.add_argument('--K', type=int, default=10)
@@ -27,10 +24,18 @@ parser.add_argument('--data', type=str, default='GM', choices=[
        # connected
        'normal', 'scaledNormal', 'rotatedNormal', 'ring',
        # disconnected
-       'GM', 'GM_scale1', 'GM_scale2', 'GMn2', 'concentric'])
+       'GM', 'GM_scale1', 'GM_scale2', 'GMn2', 'concentric',
+       # UCI
+       'gas16_co', 'gas16_methane', 'gas8_co',
+       ])
 parser.add_argument('--save-token', type=str, default='')
 parser.add_argument('--save-dir', type=str)
+parser.add_argument('--time', type=int, default=0)
+parser.add_argument('--check-obj', type=int, default=0)
 args = parser.parse_args()
+
+TIME=args.time
+CHECK_OBJ=args.check_obj
 
 if args.lib == 'np':
   from em_utils_np import *
@@ -39,14 +44,20 @@ elif args.lib == 'torch':
 
 SAVE_ROOT = 'runs_gaussianization'
 
-def fit(X, mu_low, mu_up, data_token=''):
+def fit(X, Xtest, mu_low, mu_up, data_token=''):
   x = X
   fimg = 'figs/hist2d_{}_init.png'.format(data_token)
+  fimg = os.path.join(args.save_dir, fimg)
+  plot_hist(x, fimg)
+  x = Xtest
+  fimg = 'figs/hist2d_{}_init_test.png'.format(data_token)
   fimg = os.path.join(args.save_dir, fimg)
   plot_hist(x, fimg)
 
   if args.lib == 'torch':
     X = to_tensor(X)
+    Xtest = to_tensor(Xtest)
+
   A_mode = args.mode
   D = X.shape[1]
   K = args.K
@@ -56,12 +67,23 @@ def fit(X, mu_low, mu_up, data_token=''):
   threshs = get_aranges(1e-9, 1e-5, n_steps)
   A, pi, mu, sigma_sqr = init_params(D, K, mu_low, mu_up)
   NLLs, KLs = [], []
+  NLLs_test, KLs_test = [], []
+
+  # get initial metrics
+  # train
   nll = eval_NLL(X)
   NLLs += nll,
   kl = eval_KL(X, pi, mu, sigma_sqr)
   KLs += kl,
   print('Initial NLL:', nll)
   print('Inital KL:', kl)
+  # test
+  nll_test = eval_NLL(Xtest)
+  NLLs_test += nll_test,
+  kl_test = eval_KL(Xtest, pi, mu, sigma_sqr)
+  KLs_test += kl_test,
+  print('Initial NLL (test):', nll_test)
+  print('Inital KL (test):', kl_test)
 
   grad_norms_total = []
   if TIME:
@@ -95,8 +117,10 @@ def fit(X, mu_low, mu_up, data_token=''):
           grad_norms_total += np.array(grad_norms).mean(),
       if type(X) is torch.Tensor:
         Y = X.matmul(A.T)
+        Ytest = Xtest.matmul(A.T)
       else:
         Y = X.dot(A.T)
+        Ytest = X.dot(A.T)
     print('mu: mean={:.3e}/ std={:.3e}'.format(mu.mean(), mu.std()))
     print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
     if CHECK_OBJ:
@@ -110,6 +134,10 @@ def fit(X, mu_low, mu_up, data_token=''):
     fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}_Y.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)
     plot_hist(Y, fimg)
+    fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}_Ytest.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
+    fimg = os.path.join(args.save_dir, fimg)
+    plot_hist(Ytest, fimg)
+
     if TIME:
       nll_start = time()
     nll = eval_NLL(Y)
@@ -124,8 +152,6 @@ def fit(X, mu_low, mu_up, data_token=''):
     X = gaussianize_1d(Y, pi, mu, sigma_sqr)
     if TIME:
       time_g1d += time() - g1d_start,
-
-    if TIME:
       nll_start = time()
     nll = eval_NLL(X)
     kl = eval_KL(X, pi, mu, sigma_sqr)
@@ -135,11 +161,24 @@ def fit(X, mu_low, mu_up, data_token=''):
     KLs += kl,
     print('NLL:', nll)
     print('KL:', kl)
-    print()
     x = X
     fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)
     plot_hist(x, fimg)
+
+    # check on test data
+    Xtest = gaussianize_1d(Ytest, pi, mu, sigma_sqr)
+    x = Xtest
+    fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}_test.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
+    fimg = os.path.join(args.save_dir, fimg)
+    plot_hist(x, fimg)
+    nll_test = eval_NLL(Xtest)
+    kl_test = eval_KL(Xtest, pi, mu, sigma_sqr)
+    NLLs_test += nll_test,
+    KLs_test += kl_test,
+    print('NLL (test):', nll_test)
+    print('KL (test):', kl_test)
+    print()
 
     if args.save_dir:
       if TIME:
@@ -177,14 +216,25 @@ def fit(X, mu_low, mu_up, data_token=''):
     np.save(os.path.join(args.save_dir, 'time_G1D.npy'), np.array(time_g1d))
     np.save(os.path.join(args.save_dir, 'time_NLL.npy'), np.array(time_NLL))
     np.save(os.path.join(args.save_dir, 'time_save.npy'), np.array(time_save))
+  # train
   np.save(os.path.join(args.save_dir, 'NLLs.npy'), np.array(NLLs))
   plt.plot(NLLs)
   plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL.png'))
   plt.close()
-  np.save(os.path.join(args.save_dir, 'KLs.npy'), np.array(NLLs))
-  plt.plot(NLLs)
+  np.save(os.path.join(args.save_dir, 'KLs.npy'), np.array(KLs))
+  plt.plot(KLs)
   plt.savefig(os.path.join(args.save_dir, 'figs', 'KL.png'))
   plt.close()
+  # test
+  np.save(os.path.join(args.save_dir, 'NLLs_test.npy'), np.array(NLLs_test))
+  plt.plot(NLLs_test)
+  plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL_test.png'))
+  plt.close()
+  np.save(os.path.join(args.save_dir, 'KLs_test.npy'), np.array(KLs_test))
+  plt.plot(KLs)
+  plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_test.png'))
+  plt.close()
+
   if args.mode == 'GA':
     np.save(os.path.join(args.save_dir, 'grad_norms.npy'), np.array(grad_norms_total))
     plt.plot(grad_norms_total)
@@ -196,8 +246,8 @@ if __name__ == '__main__':
   # test()
   # gen_data()
 
-  data_dir = './datasets/EM'
-  args.save_dir = '{}_mode{}_K{}_iter{}_em{}_gd{}{}'.format(
+  data_dir = './datasets/'
+  args.save_dir = '{}/mode{}_K{}_iter{}_em{}_gd{}{}'.format(
         args.data, args.mode, args.K, args.n_steps, args.n_em, args.n_gd, '_gamma{}_gammaMin{}'.format(args.gamma, args.gamma_min) if args.mode == 'GA' else '')
   if args.n_pts:
     args.save_dir += '_nPts{}'.format(args.n_pts)
@@ -212,34 +262,43 @@ if __name__ == '__main__':
   data_token = args.data
   mu_low, mu_up = -2, 2
   if data_token == 'GM':
-    fdata = 'GM_2d.npy'
+    fdata = 'EM/GM_2d.npy'
+    fdata_val = 'EM/GM_2d_scale4_test.npy'
     mu_low, mu_up = -4, 4
   if data_token == 'GM_scale1':
-    fdata = 'GM_2d_scale1.npy'
+    fdata = 'EM/GM_2d_scale1.npy'
     mu_low, mu_up = -4, 4
   if data_token == 'GM_scale2':
-    fdata = 'GM_2d_scale2.npy'
+    fdata = 'EM/GM_2d_scale2.npy'
     mu_low, mu_up = -4, 4
   if data_token == 'GMn2':
-    fdata = 'GM_2d_2centers.npy'
+    fdata = 'EM/GM_2d_2centers.npy'
     mu_low, mu_up = -4, 4
   elif data_token == 'normal':
-    fdata = 'normal.npy'
+    fdata = 'EM/normal.npy'
   elif data_token == 'rotatedNormal':
-    fdata = 'rotatedNormal.npy'
+    fdata = 'EM/rotatedNormal.npy'
   elif data_token == 'scaledNormal':
-    fdata = 'scaledNormal.npy'
+    fdata = 'EM/scaledNormal.npy'
   elif data_token == 'ring':
-    fdata = 'ring.npy'
+    fdata = 'EM/ring.npy'
     mu_low, mu_up = -1, 1
   elif data_token == 'concentric':
     # 2 circles w/ radius 0.5 and 2. Each with 10k points.
-    fdata = 'concentric.npy'
+    fdata = 'EM/concentric.npy'
+  elif data_token == 'gas16_co':
+    fdata = 'GAS/gas_d16_CO_normed_train400k.npy'
+    fdata_val = 'GAS/gas_d16_CO_normed_test.npy'
+  elif data_token == 'gas16_methane':
+    fdata = 'GAS/gas_d16_methane.npy'
+  elif data_token == 'gas8_co':
+    fdata = 'flows_data/gas/gas_train.npy'
   
   data_token += args.save_token
 
   X = np.load(os.path.join(data_dir, fdata))
+  Xtest = np.load(os.path.join(data_dir, fdata_val))
   if args.n_pts:
     X = X[:args.n_pts]
-  fit(X, mu_low, mu_up, data_token)
+  fit(X, Xtest, mu_low, mu_up, data_token)
   
