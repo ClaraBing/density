@@ -5,6 +5,7 @@ import torch.utils.data as data
 import torchvision
 from torchvision import transforms
 from torchvision.datasets import MNIST, FashionMNIST
+from .dataset_gas8 import GAS8
 from .dataset_gas16 import GAS16
 from .dataset_gas128 import GAS128
 from .dataset_line import GaussianLine
@@ -26,6 +27,8 @@ def get_loader(args, is_train):
     dset = GaussianMixture(dlen=args.dlen)
   elif dataset == 'uniform':
     dset = Uniform(dlen=args.dlen)
+  elif dataset == 'GAS8':
+    dset = GAS8(args.norm_by_col)
   elif dataset == 'GAS16':
     dset = GAS16(args.norm_by_col)
   elif dataset == 'GAS128':
