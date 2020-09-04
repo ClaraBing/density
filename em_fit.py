@@ -34,15 +34,15 @@ parser.add_argument('--time', type=int, default=0)
 parser.add_argument('--check-obj', type=int, default=0)
 args = parser.parse_args()
 
-TIME=args.time
-CHECK_OBJ=args.check_obj
-
 if args.lib == 'np':
   from em_utils_np import *
 elif args.lib == 'torch':
   from em_utils_torch import *
 
 SAVE_ROOT = 'runs_gaussianization'
+
+TIME=args.time
+CHECK_OBJ=args.check_obj
 
 def fit(X, Xtest, mu_low, mu_up, data_token=''):
   x = X
@@ -93,12 +93,14 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     time_save = []
     time_NLL = []
     time_A, time_E, time_GA, time_Y = [], [], [], []
+    time_obj, n_iters_btls = [], []
   for i in range(n_steps):
     iter_start = time()
     print('iteration', i)
     if A_mode == 'ICA':
       Y, A, pi, mu, sigma_sqr, avg_time = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
                 A_mode=A_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
+      objs = []
     else:
       if A_mode == 'random':
         A = ortho_group.rvs(D)
@@ -113,14 +115,16 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
           time_E += avg_time['E'],
           time_GA += avg_time['GA'],
           time_Y += avg_time['Y'],
+          time_obj += avg_time['obj'],
+          n_iters_btls += avg_time['btls_nIters'],
         if args.mode == 'GA':
           grad_norms_total += np.array(grad_norms).mean(),
-      if type(X) is torch.Tensor:
-        Y = X.matmul(A.T)
-        Ytest = Xtest.matmul(A.T)
-      else:
-        Y = X.dot(A.T)
-        Ytest = X.dot(A.T)
+    if type(X) is torch.Tensor:
+      Y = X.matmul(A.T)
+      Ytest = Xtest.matmul(A.T)
+    else:
+      Y = X.dot(A.T)
+      Ytest = X.dot(A.T)
     print('mu: mean={:.3e}/ std={:.3e}'.format(mu.mean(), mu.std()))
     print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
     if CHECK_OBJ:
@@ -200,8 +204,10 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       print("Timing (data={} / K={} / n_pts={} ):".format(args.data, args.K, args.n_pts))
       print('EM: {:.4e}'.format(np.array(time_em).mean()))
       print('--  A: {:.4e}'.format(np.array(time_A).mean()))
+      print('-- btls: {:.4e}'.format(np.array(n_iters_btls).mean()))
       print('--  E: {:.4e}'.format(np.array(time_E).mean()))
       print('-- GA: {:.4e}'.format(np.array(time_GA).mean()))
+      print('-- obj: {:.4e}'.format(np.array(time_obj).mean()))
       print('--  Y: {:.4e}'.format(np.array(time_Y).mean()))
       print('G1D : {:.4e}'.format(np.array(time_g1d).mean()))
       print('NLL : {:.4e}'.format(np.array(time_NLL).mean()))
@@ -210,8 +216,10 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   if TIME:
     np.save(os.path.join(args.save_dir, 'time_em.npy'), np.array(time_em))
     np.save(os.path.join(args.save_dir, 'time_A.npy'), np.array(time_A))
+    np.save(os.path.join(args.save_dir, 'time_btls_nIters.npy'), np.array(btls_nIters))
     np.save(os.path.join(args.save_dir, 'time_E.npy'), np.array(time_E))
     np.save(os.path.join(args.save_dir, 'time_GA.npy'), np.array(time_GA))
+    np.save(os.path.join(args.save_dir, 'time_obj.npy'), np.array(time_obj))
     np.save(os.path.join(args.save_dir, 'time_Y.npy'), np.array(time_Y))
     np.save(os.path.join(args.save_dir, 'time_G1D.npy'), np.array(time_g1d))
     np.save(os.path.join(args.save_dir, 'time_NLL.npy'), np.array(time_NLL))
@@ -221,18 +229,20 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   plt.plot(NLLs)
   plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL.png'))
   plt.close()
-  np.save(os.path.join(args.save_dir, 'KLs.npy'), np.array(KLs))
-  plt.plot(KLs)
-  plt.savefig(os.path.join(args.save_dir, 'figs', 'KL.png'))
+  KLs = np.array(KLs)
+  np.save(os.path.join(args.save_dir, 'KLs.npy'), KLs)
+  plt.plot(np.log(KLs))
+  plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log.png'))
   plt.close()
   # test
   np.save(os.path.join(args.save_dir, 'NLLs_test.npy'), np.array(NLLs_test))
   plt.plot(NLLs_test)
   plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL_test.png'))
   plt.close()
-  np.save(os.path.join(args.save_dir, 'KLs_test.npy'), np.array(KLs_test))
-  plt.plot(KLs)
-  plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_test.png'))
+  KLs_test = np.array(KLs_test)
+  np.save(os.path.join(args.save_dir, 'KLs_test.npy'), KLs_test)
+  plt.plot(np.log(KLs_test))
+  plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log_test.png'))
   plt.close()
 
   if args.mode == 'GA':
@@ -247,8 +257,16 @@ if __name__ == '__main__':
   # gen_data()
 
   data_dir = './datasets/'
+  ga_token = ''
+  if args.mode == 'GA':
+    if args.gamma == 0:
+      ga_token = '_perturbed'
+    elif args.gamma < 0:
+      ga_token = '_BTLS'
+    else:
+      ga_token = '_gamma{}_gammaMin{}'.format(args.gamma, args.gamma_min)
   args.save_dir = '{}/mode{}_K{}_iter{}_em{}_gd{}{}'.format(
-        args.data, args.mode, args.K, args.n_steps, args.n_em, args.n_gd, '_gamma{}_gammaMin{}'.format(args.gamma, args.gamma_min) if args.mode == 'GA' else '')
+        args.data, args.mode, args.K, args.n_steps, args.n_em, args.n_gd, ga_token)
   if args.n_pts:
     args.save_dir += '_nPts{}'.format(args.n_pts)
   if args.save_token:
