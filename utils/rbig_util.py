@@ -21,7 +21,7 @@ if torch.cuda.is_available():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-device = 'cuda'
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 normal_distribution = tdist.Normal(0, 1)
 
@@ -47,7 +47,8 @@ def flow_loss(u, log_jacob, size_average=True):
     loss = -(log_probs + log_jacob)
     if size_average:
         loss /= u.size(0)
-    return loss
+        log_probs /= u.size(0)
+    return loss, log_probs
 
 
 def sigmoid_transform(samples, lambd=1e-5):
@@ -65,6 +66,7 @@ def logistic_kernel_pdf(x, datapoint, h):
     return pdf
 
 
+# unused
 def logistic_kernel_log_pdf(x, datapoint, h):
     n = datapoint.shape[0]
     log_pdfs = -(x[None, ...] - datapoint[:, None, :]) / h[:, None, :] - torch.log(h[:, None, :]) - \
@@ -72,25 +74,41 @@ def logistic_kernel_log_pdf(x, datapoint, h):
     log_pdf = torch.logsumexp(log_pdfs, dim=0)
     return log_pdf
 
+def compute_KL(x, datapoint, h):
+  D = x.shape[1]
+  log_pdf = logistic_kernel_log_pdf(x, datapoint, h)
+  log_pdf = log_pdf.sum(-1)
+  pdf = torch.exp(log_pdf)
+  pdf /= pdf.sum()
+  log_pdf = torch.log(pdf)
+  # pdf = logistic_kernel_pdf(x, datapoint, h)
 
+  log_pdf_normal = -0.5 * (x**2).sum(1) - -0.5 * D * np.log(2*np.pi)
+  pdf_normal = torch.exp(log_pdf_normal)
+  pdf_normal /= pdf_normal.sum()
+  log_pdf_normal = torch.log(pdf_normal)
+
+  kl = (pdf * (log_pdf - log_pdf_normal)).sum().item()
+  return kl
+
+# unused
 def logistic_kernel_cdf(x, datapoint, h):
     n = datapoint.shape[0]
     try:
       log_cdfs = - F.softplus(-(x[None, ...] - datapoint[:, None, :]) / h[None, ...]) - np.log(n)
       log_cdf = torch.logsumexp(log_cdfs, dim=0)
-      cdf = torch.exp(log_cdf).float()
+      cdf = torch.exp(log_cdf).double()
     except Exception as e:
       print(e)
       pdb.set_trace()
     return cdf
-
 
 # return log(CDF)
 def logistic_kernel_log_cdf(x, datapoint, h):
     n = datapoint.shape[0]
     log_cdfs = - F.softplus(-(x[None, ...] - datapoint[:, None, :]) / h[None, ...]) - np.log(n)
     log_cdf = torch.logsumexp(log_cdfs, dim=0)
-    return log_cdf
+    return log_cdf.double()
 
 
 # return log(1-CDF)
@@ -98,15 +116,15 @@ def logistic_kernel_log_sf(x, datapoint, h):
     n = datapoint.shape[0]
     log_sfs = - F.softplus((x[None, ...] - datapoint[:, None, :]) / h[None, ...]) - np.log(n)
     log_sf = torch.logsumexp(log_sfs, dim=0)
-    return log_sf
+    return log_sf.double()
 
 
 def compute_log_det(x, gaussianalized_x, datapoints, cdf_mask, log_cdf_l, cdf_mask_left,
                     log_sf_l, cdf_mask_right, h, squeeze=True):
-    n = datapoints.shape[0]
+    N = datapoints.shape[0]
     log_pdfs = -(x[None, ...] - datapoints[:, None, :]) / h[None, ...] - torch.log(h[None, ...]) - \
-               2 * F.softplus(-(x[None, ...] - datapoints[:, None, :]) / h[None, ...]) - np.log(n)
-    log_pdf = torch.logsumexp(log_pdfs, dim=0).float()
+               2 * F.softplus(-(x[None, ...] - datapoints[:, None, :]) / h[None, ...]) - np.log(N)
+    log_pdf = torch.logsumexp(log_pdfs, dim=0).double()
 
     log_gaussian_derivative_good = tdist.Normal(0, 1).log_prob(gaussianalized_x) * cdf_mask
     cdf_l_bad_right_log = log_sf_l * cdf_mask_right + (-1.) * (1. - cdf_mask_right)
@@ -139,26 +157,24 @@ def logistic_inverse_normal_cdf(x, bandwidth, datapoints):
     cdf_l = logistic_kernel_cdf(x, datapoints, h=bandwidth)
     log_cdf_l = logistic_kernel_log_cdf(x, datapoints, h=bandwidth)  # log(CDF)
     log_sf_l = logistic_kernel_log_sf(x, datapoints, h=bandwidth)  # log(1-CDF)
-    # TODO: should I convert everything to Float?
-    log_cdf_l, log_sf_l = log_cdf_l.float(), log_sf_l.float()
 
     # Approximate Gaussian CDF
     # inv(CDF) ~ np.sqrt(-2 * np.log(1-x)) #right, x -> 1
     # inv(CDF) ~ -np.sqrt(-2 * np.log(x)) #left, x -> 0
     # 1) Step1: invert good CDF
-    cdf_mask = ((cdf_l > mask_bound) & (cdf_l < 1 - (mask_bound))).float()
+    cdf_mask = ((cdf_l > mask_bound) & (cdf_l < 1 - (mask_bound))).double()
     # Keep good CDF, mask the bad CDF values to 0.5(inverse(0.5)=0.)
     cdf_l_good = cdf_l * cdf_mask + 0.5 * (1. - cdf_mask)
     inverse_l = normal_distribution.icdf(cdf_l_good)
 
     # 2) Step2: invert BAD large CDF
-    cdf_mask_right = (cdf_l >= 1. - (mask_bound)).float()
+    cdf_mask_right = (cdf_l >= 1. - (mask_bound)).double()
     # Keep large bad CDF, mask the good and small bad CDF values to 0.
     cdf_l_bad_right_log = log_sf_l * cdf_mask_right
     inverse_l += torch.sqrt(-2. * cdf_l_bad_right_log)
 
     # 3) Step3: invert BAD small CDF
-    cdf_mask_left = (cdf_l <= mask_bound).float()
+    cdf_mask_left = (cdf_l <= mask_bound).double()
     # Keep small bad CDF, mask the good and large bad CDF values to 1.
     cdf_l_bad_left_log = log_cdf_l * cdf_mask_left
     inverse_l += (-torch.sqrt(-2 * cdf_l_bad_left_log))
@@ -170,15 +186,15 @@ def invert_bisection_combo(x, rotation_matrix, datapoints, bandwidth, verbose=Fa
     z = torch.mm(x, rotation_matrix.permute(1, 0))
     iteration = int(np.log2(upper - lower) + np.log2(1e6))
 
-    upper = torch.tensor(upper).float().repeat(*z.shape).to(device)
-    lower = torch.tensor(lower).float().repeat(*z.shape).to(device)
+    upper = torch.tensor(upper).double().repeat(*z.shape).to(device)
+    lower = torch.tensor(lower).double().repeat(*z.shape).to(device)
     for i in range(iteration):
         mid = (upper + lower) / 2.
         inverse_mid, _, _, _ = logistic_inverse_normal_cdf(mid, bandwidth, datapoints)
-        right_part = (inverse_mid < z).float()
+        right_part = (inverse_mid < z).double()
         left_part = 1. - right_part
 
-        correct_part = (close(inverse_mid, z, rtol=1e-6, atol=0)).float()
+        correct_part = (close(inverse_mid, z, rtol=1e-6, atol=0)).double()
         lower = (1. - correct_part) * (right_part * mid + left_part * lower) + correct_part * mid
         upper = (1. - correct_part) * (right_part * upper + left_part * mid) + correct_part * mid
 
@@ -192,9 +208,9 @@ def sampling(rotation_matrices, data_anchors, bandwidths, image_name='RBIG_sampl
     if not SILENT:
       print("Start sampling")
     if d is not None:
-      x = torch.randn(sample_num, d).float().to(device)
+      x = torch.randn(sample_num, d).double().to(device)
     elif channel is not None:
-      x = torch.randn(sample_num, channel * image_size * image_size).float().to(device)
+      x = torch.randn(sample_num, channel * image_size * image_size).double().to(device)
 
     for i in range(sample_num // process_size):
         for l in range(len(rotation_matrices) - 1, -1, -1):
@@ -229,7 +245,7 @@ def generate_orthogonal_matrix(data_anchor, rot_type="PCA", verbose=False):
       # PCA
       rotation_matrix, _, _ = torch.svd(
           torch.mm(data_anchor.permute(1, 0), data_anchor))
-      rotation_matrix = rotation_matrix.float()
+      rotation_matrix = rotation_matrix.double()
     elif rot_type == 'ICA':
       # NOTE: FastICA is extremely slow for high dim data and may not converge.
       ica = FastICA()
@@ -241,12 +257,14 @@ def generate_orthogonal_matrix(data_anchor, rot_type="PCA", verbose=False):
         try:
           Y = ica.fit_transform(data_anchor.cpu())
           rotation_matrix = np.linalg.inv(ica.mixing_)
-          rotation_matrix = torch.tensor(rotation_matrix).float().to(device)
+          _, ss, _ = np.linalg.svd(rotation_matrix)
+          rotation_matrix /= ss[0]
+          rotation_matrix = torch.tensor(rotation_matrix).double().to(device)
           cnt = 2*n_tries
         except:
           cnt += 1
       if cnt == 2*n_tries:
-        rotation_matrix = torch.tensor(rotation_matrix).float()
+        rotation_matrix = torch.tensor(rotation_matrix).double().to(device)
       else:
         rotation_matrix = None
     if verbose:
