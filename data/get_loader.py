@@ -10,6 +10,7 @@ from .dataset_gas16 import GAS16
 from .dataset_gas128 import GAS128
 from .dataset_line import GaussianLine
 from .dataset_mixture import GaussianMixture
+from .dataset_miniboone import MINIBooNE
 from .dataset_uniform import Uniform
 
 import pdb
@@ -33,6 +34,8 @@ def get_loader(args, is_train):
     dset = GAS16(args.norm_by_col)
   elif dataset == 'GAS128':
     dset = GAS128(args.norm_by_col)
+  elif dataset == 'miniboone':
+    dset = MINIBooNE()
   elif dataset == 'MNIST':
     channel = 1
     image_size = 28
