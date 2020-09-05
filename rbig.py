@@ -10,16 +10,20 @@ from utils.rbig_util import *
 import args
 from data.get_loader import *
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from time import time
 import random
 import pdb
 
 SILENT = False
 VERBOSE = False
+DTYPE = torch.DoubleTensor
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device='cpu'
 
-TIME = 1
+TIME = 0
 
 args = args.TrainArgs().parse()
 
@@ -36,15 +40,18 @@ def set_seed(seed=None):
       torch.backends.cudnn.deterministic = True
       torch.backends.cudnn.benchmark = False
 
-def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0):
+def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_dir='outputs/'):
   test_bpd = 0
   val_loss = 0
+  val_log_prob = 0
   total = 0
   rotation_matrices = []
   FAIL_FLAG = False
   time_keys = ['gen_bandwidth', 'gen_rotation', 'inverse_cdf', 'log_det', 'sampling', 'cur_data_proc', 'flow_loss']
   times = {key:[] for key in time_keys}
+
   with torch.no_grad():
+      DATA = DATA.type(DTYPE).to(device)
       data_anchors = [DATA]
       bandwidths = []
       vectors = []
@@ -52,17 +59,30 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0):
           if type(data) is list or type(data) is tuple:
             data = data[0]
           total += data.shape[0]
-          data = data.to(device)
+          data = data.type(DTYPE).to(device)
+
+          if batch_idx == 0:
+            # show original data
+            if args.dataset in ['FashionMNIST', 'MNIST']:
+              sampling(rotation_matrices, [], [],
+                       image_name='images/RBIG_samples_{}_init.png'.format(args.dataset),
+                       channel=channel, image_size=image_size, process_size=10)
+            elif args.dataset in ['GaussianLine', 'GaussianMixture', 'uniform']:
+              sampling(rotation_matrices, [], [],
+                       image_name='images/RBIG_samples_{}_init.png'.format(args.dataset),
+                       d=data.shape[1], sample_num=10000, process_size=100)
+
 
           if data.ndim == 4: # images
             data = dequantization(data, lambd)
             data = data.view(data.shape[0], -1)
 
-          log_det = torch.zeros(data.shape[0]).to(device)
+          log_det = torch.zeros(data.shape[0]).double().to(device)
           log_det_logit = F.softplus(-data).sum() + F.softplus(data).sum() + np.prod(
                 data.shape) * np.log(1 - 2 * lambd)
 
           # Pass the data through the first l-1 gaussian layer
+          kls = []
           for prev_l in range(n_layer):
               # initialize rotation matrix
               if batch_idx == 0:
@@ -78,7 +98,6 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0):
                     print('Failed')
                     FAIL_FLAG = True
                     break
-                  # print('Succ')
                   rotation_matrices.append(rotation_matrix.to(device))
                   if TIME:
                     times['gen_rotation'] += time() - start,
@@ -130,20 +149,30 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0):
                     times['cur_data_proc'] += time() - proc_start,
                   cur_data = torch.cat(update_data_arrays, dim=0)
                   data_anchors.append(cur_data[:cur_data.shape[0]])
+              kl = compute_KL(data, data_anchors[prev_l], bandwidth)
+              print('layer {}: KL = {}'.format(prev_l, kl))
+              kls += kl,
 
           if not FAIL_FLAG:
             if TIME:
               start = time()
-            val_loss_r = flow_loss(data, log_det)
+            val_loss_r, val_log_prob_r = flow_loss(data, log_det)
             if TIME:
               times['flow_loss'] += time() - start,
             test_bpd_r = (val_loss_r.item() * data.shape[0] - log_det_logit) * (
                     1 / (np.log(2) * np.prod(data.shape))) + 8
-
             test_bpd += test_bpd_r * data.shape[0]
             val_loss += val_loss_r * data.shape[0]
+            val_log_prob += val_log_prob_r * data.shape[0]
+
             if not SILENT and log_batch and batch_idx % 100 == 0:
-                print("Batch {} loss {} bpd {}".format(batch_idx, val_loss_r, test_bpd_r))
+                print("Batch {} loss {} (log prob: {}) bpd {}".format(batch_idx, val_loss_r, val_log_prob, test_bpd_r))
+
+            plt.close()
+            kls = np.array(kls)
+            plt.plot(np.log(kls))
+            plt.savefig('{}/images/RBIG_KLlog_{}_{}_layer{}_run{}_batch{}.png'.format(out_dir, args.dataset, args.rotation_type, prev_l, n_run, batch_idx))
+            plt.close()
           else:
             break
 
@@ -151,32 +180,39 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0):
         return None, None
 
       if not SILENT:
-        print("Total loss {} bpd {}".format(val_loss / total, test_bpd / total))
+        print("Total loss {} (log prob: {}) bpd {}".format(val_loss / total, val_log_prob / total, test_bpd / total))
 
       if TIME:
         start = time()
-      if args.dataset in ['GaussianLine', 'GaussianMixture', 'uniform']:
-        sampling(rotation_matrices, data_anchors.copy(), bandwidths.copy(),
-                 image_name='images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(args.dataset, args.rotation_type, args.n_layer, n_run),
-                 d=data.shape[1], sample_num=10000, process_size=100)
-      elif args.dataset in ['FashionMNIST', 'MNIST']:
+      if args.dataset in ['FashionMNIST', 'MNIST']:
         sampling(rotation_matrices, data_anchors, bandwidths,
-                 image_name='images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(args.dataset, args.rotation_type, args.n_layer, n_run),
+                 image_name='{}/images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, args.n_layer, n_run),
                  channel=channel, image_size=image_size, process_size=10)
+      elif args.dataset in ['GaussianLine', 'GaussianMixture', 'uniform']:
+        for li, pts in enumerate(data_anchors):
+          pts = pts.cpu().numpy()
+          plt.figure(figsize=[8,8])
+          plt.hist2d(pts[:,0], pts[:,1], bins=[100,100])
+          plt.xlim([-2.5, 2.5])
+          plt.ylim([-2.5, 2.5])
+          plt.savefig('{}/images/RBIG_transformed_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, li, n_run))
+          plt.close()
+        sampling(rotation_matrices, data_anchors.copy(), bandwidths.copy(),
+                 image_name='{}/images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, args.n_layer, n_run),
+                 d=data.shape[1], sample_num=10000, process_size=100)
       if TIME:
         times['sampling'] += time() - start,
 
       if len(rotation_matrices) > 0:
         rotation_matrices = torch.stack(rotation_matrices, 0)
         rotation_matrices = rotation_matrices.detach().cpu().numpy()
-        out_dir = os.path.join('outputs/', 'RBIG_{}'.format(args.dataset))
-        os.makedirs(out_dir, exist_ok=True)
         fname = os.path.join(out_dir, 'rotMtrx_{}_layer{}_run{}.npy'.format(args.rotation_type, args.n_layer, n_run))
         np.save(fname, rotation_matrices)
 
-      for key in time_keys:
-        times[key] = np.array(times[key])
-        print('{}: mean={:.3e} / std={:.3e}'.format(key, times[key].mean(), times[key].std()))
+      if TIME:
+        for key in time_keys:
+          times[key] = np.array(times[key])
+          print('{}: mean={:.3e} / std={:.3e}'.format(key, times[key].mean(), times[key].std()))
       return val_loss / total, test_bpd / total
 
 if __name__ == '__main__':
@@ -200,46 +236,55 @@ if __name__ == '__main__':
   means, stds = [], []
   # n_layers = list(range(20))
   # n_layers = range(10)
-  n_layers = [10]
-  for n_layer in n_layers:
-    args.n_layer = n_layer
-    args.bt = total_datapoints
-    train_loader, val_loader = get_loader(args, is_train=True)
-    # args.bt = process_size
-    # val_loader = get_loader(args, is_train=False)
+
+  args.bt = total_datapoints
+  train_loader, val_loader = get_loader(args, is_train=True)
+  # args.bt = process_size
+  # val_loader = get_loader(args, is_train=False)
+  if not SILENT:
+    print('Val_loader: #', len(val_loader))
+
+  train_iter = iter(train_loader)
+  if type(train_iter) is tuple:
+    train_iter = train_iter[0]
+  DATA = next(train_iter)
+  if type(DATA) is list or type(DATA) is tuple:
+    DATA = DATA[0]
+  DATA = DATA.to(device)
+  if DATA.ndim == 4: # images
+    channel = DATA.shape[1]
+    image_size = DATA.shape[-1]
+    DATA = dequantization(DATA, lambd)
+    DATA = DATA.view(DATA.shape[0], -1)
+
+  n_runs = 1
+  losses = []
+  for i in range(n_runs):
     if not SILENT:
-      print('Val_loader: #', len(val_loader))
+      print(i)
+    set_seed()
+    out_dir = os.path.join('outputs/', 'RBIG', args.dataset)
+    out_dir = os.path.join(out_dir, '{}_L{}_bt{}_run{}'.format(args.rotation_type, args.n_layer, args.bt, i))
+    if os.path.exists(out_dir):
+      print('Dir exist:', out_dir)
+      proceed = input("Do you want to proceed? (y/N)")
+      if 'y' not in proceed:
+        print('Exiting. Bye!')
+        exit(0)
+    print("out_dir:", out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(os.path.join(out_dir, 'images'), exist_ok=True)
+    loss, _ = main(DATA, lambd, train_loader, val_loader, n_run=i, out_dir=out_dir)
+    if loss is not None:
+      losses += loss.item(),
+  best_60 = sorted(losses)[:60]
+  losses = np.array(best_60)
+  print('\nType:', args.rotation_type)
+  print('n_layer={}'.format(args.n_layer))
+  print('Loss: mean={} / std={}'.format(losses.mean(), losses.std()))
 
-    train_iter = iter(train_loader)
-    if type(train_iter) is tuple:
-      train_iter = train_iter[0]
-    DATA = next(train_iter)
-    if type(DATA) is list or type(DATA) is tuple:
-      DATA = DATA[0]
-    DATA = DATA.to(device)
-    if DATA.ndim == 4: # images
-      channel = DATA.shape[1]
-      image_size = DATA.shape[-1]
-      DATA = dequantization(DATA, lambd)
-      DATA = DATA.view(DATA.shape[0], -1)
-
-    n_runs = 5
-    losses = []
-    for i in range(n_runs):
-      if not SILENT:
-        print(i)
-      set_seed()
-      loss, _ = main(DATA, lambd, train_loader, val_loader, n_run=i)
-      if loss is not None:
-        losses += loss.item(),
-    best_60 = sorted(losses)[:60]
-    losses = np.array(best_60)
-    print('\nType:', args.rotation_type)
-    print('n_layer={}'.format(args.n_layer))
-    print('Loss: mean={} / std={}'.format(losses.mean(), losses.std()))
-
-    means += losses.mean(),
-    stds += losses.std(),
+  means += losses.mean(),
+  stds += losses.std(),
 
   # means = np.array(means)
   # stds = np.array(stds)
