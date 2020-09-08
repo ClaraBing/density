@@ -8,6 +8,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+from data.get_loader import *
+
 import pdb
 
 parser = argparse.ArgumentParser()
@@ -26,7 +28,7 @@ parser.add_argument('--data', type=str, default='GM', choices=[
        # disconnected
        'GM', 'GM_scale1', 'GM_scale2', 'GMn2', 'concentric',
        # UCI
-       'gas16_co', 'gas16_methane', 'gas8_co',
+       'gas16_co', 'gas16_methane', 'gas8_co', 'gas8_co_normed',
        ])
 parser.add_argument('--save-token', type=str, default='')
 parser.add_argument('--save-dir', type=str)
@@ -216,7 +218,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   if TIME:
     np.save(os.path.join(args.save_dir, 'time_em.npy'), np.array(time_em))
     np.save(os.path.join(args.save_dir, 'time_A.npy'), np.array(time_A))
-    np.save(os.path.join(args.save_dir, 'time_btls_nIters.npy'), np.array(btls_nIters))
+    np.save(os.path.join(args.save_dir, 'time_btls_nIters.npy'), np.array(n_iters_btls))
     np.save(os.path.join(args.save_dir, 'time_E.npy'), np.array(time_E))
     np.save(os.path.join(args.save_dir, 'time_GA.npy'), np.array(time_GA))
     np.save(os.path.join(args.save_dir, 'time_obj.npy'), np.array(time_obj))
@@ -310,7 +312,18 @@ if __name__ == '__main__':
   elif data_token == 'gas16_methane':
     fdata = 'GAS/gas_d16_methane.npy'
   elif data_token == 'gas8_co':
-    fdata = 'flows_data/gas/gas_train.npy'
+    gas_dir = 'flows_data/gas'
+    # train: 852174 points
+    fdata = os.path.join(gas_dir, 'gas_train.npy')
+    # val: 94685 points
+    fdata_val = os.path.join(gas_dir, 'gas_val.npy')
+  elif data_token == 'gas8_co_normed':
+    # gas-8d, with data normzlied per column to [-1, 1].
+    gas_dir = 'flows_data/gas'
+    # train: 852174 points
+    fdata = os.path.join(gas_dir, 'gas_train_normed.npy')
+    # val: 94685 points
+    fdata_val = os.path.join(gas_dir, 'gas_val_normed.npy')
   
   data_token += args.save_token
 
