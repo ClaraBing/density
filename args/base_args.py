@@ -49,6 +49,7 @@ class BaseArgs:
     self.parser.add_argument('--resume', type=str2bool, default=False, help='Resume from checkpoint')
     self.parser.add_argument('--seed', type=int, default=0, help='Random seed for reproducibility')
     self.parser.add_argument('--warm_up', default=500000, type=int, help='Number of steps for lr warm-up')
+    self.parser.add_argument('--save-suffix', default='', help="suffix for run save path.")
     # wandb
     self.parser.add_argument('--project', type=str)
     self.parser.add_argument('--wb-name', type=str)

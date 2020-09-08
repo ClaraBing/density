@@ -188,7 +188,8 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
         sampling(rotation_matrices, data_anchors, bandwidths,
                  image_name='{}/images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, args.n_layer, n_run),
                  channel=channel, image_size=image_size, process_size=10)
-      elif args.dataset in ['GaussianLine', 'GaussianMixture', 'uniform']:
+      else:
+        # args.dataset in ['GaussianLine', 'GaussianMixture', 'uniform']:
         for li, pts in enumerate(data_anchors):
           pts = pts.cpu().numpy()
           plt.figure(figsize=[8,8])
@@ -264,7 +265,7 @@ if __name__ == '__main__':
       print(i)
     set_seed()
     out_dir = os.path.join('outputs/', 'RBIG', args.dataset)
-    out_dir = os.path.join(out_dir, '{}_L{}_bt{}_run{}'.format(args.rotation_type, args.n_layer, args.bt, i))
+    out_dir = os.path.join(out_dir, '{}_L{}_bt{}{}_run{}'.format(args.rotation_type, args.n_layer, args.bt, args.save_suffix, i))
     if os.path.exists(out_dir):
       print('Dir exist:', out_dir)
       proceed = input("Do you want to proceed? (y/N)")
