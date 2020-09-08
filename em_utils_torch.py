@@ -272,14 +272,15 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
 
         optimizer.zero_grad()
         obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-        obj *= -1
         objs[-1] += obj.item(),
+        obj *= -1
         if TIME:
           time_obj += time() - obj_start,
         if VERBOSE:
           print('iter {}: obj= {:.5f}'.format(i, obj.item()))
 
         obj.backward()
+        A.grad[torch.where(torch.isnan(A.grad))] = 0
         optimizer.step()
         # _, ss, _ = torch.svd(A)
         # A /= ss[0]
@@ -329,6 +330,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         optimizer.zero_grad()
         obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
         objs[-1] += obj.item(),
+        obj *= -1
         if TIME:
           time_obj += time() - obj_start,
         if VERBOSE:
@@ -417,7 +419,6 @@ def eval_NLL(X):
   return NLL.item()
 
 def eval_KL(X, pi, mu, sigma_sqr):
-  # pdb.set_trace()
   N, D = X.shape
   exponents_normal = -0.5 * (X**2).sum(1)
   log_prob_normal = -0.5 * D * np.log(2*np.pi) + exponents_normal
