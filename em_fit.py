@@ -19,7 +19,7 @@ parser.add_argument('--gamma-min', type=float, default=0.001)
 parser.add_argument('--n-steps', type=int, default=50)
 parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
-parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'torchGA', 'CF', 'ICA'])
+parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'torchGA', 'torchAll', 'CF', 'ICA'])
 parser.add_argument('--data', type=str, default='GM', choices=[
        # connected
        'normal', 'scaledNormal', 'rotatedNormal', 'ring',
@@ -50,7 +50,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   fimg = os.path.join(args.save_dir, fimg)
   plot_hist(x, fimg)
   x = Xtest
-  fimg = 'figs/hist2d_{}_init_test.png'.format(data_token)
+  fimg = 'figs/hist2d_test_{}_init.png'.format(data_token)
   fimg = os.path.join(args.save_dir, fimg)
   plot_hist(x, fimg)
 
@@ -139,7 +139,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}_Y.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)
     plot_hist(Y, fimg)
-    fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}_Ytest.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
+    fimg = 'figs/hist2d_test_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}_Y.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)
     plot_hist(Ytest, fimg)
 
@@ -166,6 +166,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     KLs += kl,
     print('NLL:', nll)
     print('KL:', kl)
+
     x = X
     fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)
@@ -174,7 +175,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     # check on test data
     Xtest = gaussianize_1d(Ytest, pi, mu, sigma_sqr)
     x = Xtest
-    fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}_test.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
+    fimg = 'figs/hist2d_test_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)
     plot_hist(x, fimg)
     nll_test = eval_NLL(Xtest)
@@ -205,9 +206,8 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       plt.plot(NLLs)
       plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL.png'))
       plt.close()
-      KLs = np.array(KLs)
-      np.save(os.path.join(args.save_dir, 'KLs.npy'), KLs)
-      plt.plot(np.log(KLs))
+      np.save(os.path.join(args.save_dir, 'KLs.npy'), np.array(KLs))
+      plt.plot(np.log(np.array(KLs)))
       plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log.png'))
       plt.close()
 
