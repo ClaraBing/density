@@ -96,7 +96,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     time_obj, n_iters_btls = [], []
   for i in range(n_steps):
     iter_start = time()
-    print('iteration', i)
+    print('iteration {} - data={} - mode={}'.format(i, args.data, args.mode))
     if A_mode == 'ICA':
       Y, A, pi, mu, sigma_sqr, avg_time = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
                 A_mode=A_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
@@ -200,6 +200,17 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         np.save(os.path.join(args.save_dir, 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr)
       if TIME:
         time_save += time() - save_start,
+      # NLL + KL
+      np.save(os.path.join(args.save_dir, 'NLLs.npy'), np.array(NLLs))
+      plt.plot(NLLs)
+      plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL.png'))
+      plt.close()
+      KLs = np.array(KLs)
+      np.save(os.path.join(args.save_dir, 'KLs.npy'), KLs)
+      plt.plot(np.log(KLs))
+      plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log.png'))
+      plt.close()
+
     if TIME:
       time_iter += time() - iter_start,
       print("Timing (data={} / K={} / n_pts={} ):".format(args.data, args.K, args.n_pts))
@@ -217,7 +228,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   if TIME:
     np.save(os.path.join(args.save_dir, 'time_em.npy'), np.array(time_em))
     np.save(os.path.join(args.save_dir, 'time_A.npy'), np.array(time_A))
-    np.save(os.path.join(args.save_dir, 'time_btls_nIters.npy'), np.array(btls_nIters))
+    np.save(os.path.join(args.save_dir, 'time_btls_nIters.npy'), np.array(n_iters_btls))
     np.save(os.path.join(args.save_dir, 'time_E.npy'), np.array(time_E))
     np.save(os.path.join(args.save_dir, 'time_GA.npy'), np.array(time_GA))
     np.save(os.path.join(args.save_dir, 'time_obj.npy'), np.array(time_obj))
