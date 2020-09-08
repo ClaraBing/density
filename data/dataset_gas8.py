@@ -10,7 +10,7 @@ import pdb
 class GAS8(data.Dataset):
 
   def __init__(self, norm_by_col=0):
-    fdata = './datasets/flows_data/gas/gas_trainval.npy'
+    fdata = './datasets/flows_data/gas/gas_trainval_200k.npy'
     self.X = np.load(fdata)
     self.len = len(self.X)
 
