@@ -261,17 +261,13 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
     print('A:', A.view(-1))
 
   if TIME:
-    if not time_obj:
-      time_obj = [0]
-    if not n_iters_btls:
-      n_iters_btls = [0]
     avg_time = {
-      'A': np.array(time_A).mean(),
-      'E': np.array(time_E).mean(),
-      'GA': np.array(time_GA).mean(),
-      'Y': np.array(time_Y).mean(),
-      'obj': np.array(time_obj).mean(),
-      'btls_nIters': np.array(n_iters_btls).mean(),
+      'A': np.array(time_A).mean() if time_A else 0,
+      'E': np.array(time_E).mean() if time_E else 0,
+      'GA': np.array(time_GA).mean() if time_GA else 0,
+      'Y': np.array(time_Y).mean() if time_Y else 0,
+      'obj': np.array(time_obj).mean() if time_obj else 0,
+      'btls_nIters': np.array(n_iters_btls).mean() if n_iters_btls else 0,
     }
 
   if A_mode == 'ICA':
@@ -292,6 +288,9 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
    new_distr = (pi.cpu().numpy() * cdf).sum(-1)
    new_X = norm.ppf(new_distr)
    new_X = to_tensor(new_X)
+   if torch.isnan(new_X.max()):
+     print("gaussianize_1d: new_X has nan.")
+     pdb.set_trcae()
    return new_X
 
 def eval_NLL(X):
