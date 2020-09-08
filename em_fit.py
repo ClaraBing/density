@@ -19,14 +19,14 @@ parser.add_argument('--gamma-min', type=float, default=0.001)
 parser.add_argument('--n-steps', type=int, default=50)
 parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
-parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'CF', 'ICA'])
+parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'torchGA', 'CF', 'ICA'])
 parser.add_argument('--data', type=str, default='GM', choices=[
        # connected
        'normal', 'scaledNormal', 'rotatedNormal', 'ring',
        # disconnected
        'GM', 'GM_scale1', 'GM_scale2', 'GMn2', 'concentric',
        # UCI
-       'gas16_co', 'gas16_methane', 'gas8_co',
+       'gas16_co', 'gas16_methane', 'gas8_co', 'miniboone',
        ])
 parser.add_argument('--save-token', type=str, default='')
 parser.add_argument('--save-dir', type=str)
@@ -105,6 +105,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       if A_mode == 'random':
         A = ortho_group.rvs(D)
       else:
+        # A_mode = 'GA' or 'torchGA'
         if TIME:
           em_start = time()
         X, A, pi, mu, sigma_sqr, grad_norms, objs, avg_time = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
@@ -258,7 +259,7 @@ if __name__ == '__main__':
 
   data_dir = './datasets/'
   ga_token = ''
-  if args.mode == 'GA':
+  if args.mode in ['GA', 'torchGA']:
     if args.gamma == 0:
       ga_token = '_perturbed'
     elif args.gamma < 0:
@@ -311,6 +312,9 @@ if __name__ == '__main__':
     fdata = 'GAS/gas_d16_methane.npy'
   elif data_token == 'gas8_co':
     fdata = 'flows_data/gas/gas_train.npy'
+  elif data_token == 'miniboone':
+    fdata = 'miniboone/train_normed.npy'
+    fdata_val = 'miniboone/val_normed.npy'
   
   data_token += args.save_token
 

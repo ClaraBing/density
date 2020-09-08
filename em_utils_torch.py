@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import torch.optim as optim
 from scipy.stats import ortho_group, norm
 import matplotlib
 matplotlib.use('Agg')
@@ -64,7 +65,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
 
   Y = None
   if A_mode == 'ICA':
-    # pdb.set_trace()
     cov = X.T.matmul(X) / len(X)
     cnt = 0
     n_tries = 20
@@ -243,6 +243,55 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
           objs[-1] += obj,
           if VERBOSE:
             print('iter {}: obj= {:.5f}'.format(i, obj))
+
+    elif A_mode == 'torchGA': # gradient ascent with torch
+      if CHECK_OBJ:
+        obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+        objs[-1] += obj.item(),
+
+      A.requires_grad = True
+      # pi.requires_grad = False
+      # mu.requires_grad = False
+      # sigma_sqr.requires_grad = False
+      # w.requires_grad = False
+
+      optimizer = optim.Adam([A], lr=gamma)
+
+      for i in range(n_gd_steps):
+        ga_start = time()
+        if VERBOSE: print(A.view(-1))
+        
+        if False: # TODO: should I update w per GD step?
+          Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr)
+
+        pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
+
+        if TIME:
+          a_start = time()
+          obj_start = time()
+
+        optimizer.zero_grad()
+        obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+        objs[-1] += obj.item(),
+        if TIME:
+          time_obj += time() - obj_start,
+        if VERBOSE:
+          print('iter {}: obj= {:.5f}'.format(i, obj.item()))
+
+        obj.backward()
+        optimizer.step()
+        # _, ss, _ = torch.svd(A)
+        # A /= ss[0]
+        if TIME:
+          time_A += time() - a_start,
+          time_GA += time() - ga_start,
+        grad_norms += torch.norm(A.grad).item(),
+        
+      A = A.detach()
+      pi = pi.detach()
+      mu = mu.detach()
+      sigma_sqr = sigma_sqr.detach()
+      w = w.detach()
 
     elif A_mode == 'ICA':
       # NOTE: passing in Y as an argument since A is not explicitly calculated.
