@@ -138,6 +138,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
       Y = Y.T
       exponents = (Y.view(N, D, 1) - mu)**2 / sigma_sqr
       exp = torch.exp(-0.5 * exponents) / (2*np.pi * sigma_sqr)**(1/2)
+      # pi = torch.max(pi, to_tensor(np.array([0.])))
       prob = (exp * pi).sum(-1)
       log = torch.log(prob) 
       log[prob == 0] = 0 # mask out NaN
@@ -146,6 +147,21 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         print('objective is NaN.') 
         pdb.set_trace()
       return obj
+
+    def get_grad(X, A, w, mu, sigma_sqr):
+      if TIME:
+        y_start = time()
+      Y = A.matmul(X.T)
+      if TIME:
+        y_time = time() - y_start
+      else:
+        y_time = 0
+
+      scaled = (-Y.T.view(N, D, 1) + mu) / sigma_sqr
+      weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
+      B = weighted_X.sum(0).sum(-1) / N
+      grad = torch.inverse(A).T + B
+      return grad, y_time
 
     if TIME:
       e_start = time()
@@ -168,20 +184,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
 
         pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
 
-        def get_grad(X, A, w, mu, sigma_sqr):
-          if TIME:
-            y_start = time()
-          Y = A.matmul(X.T)
-          if TIME:
-            y_time = time() - y_start
-          else:
-            y_time = 0
-
-          scaled = (-Y.T.view(N, D, 1) + mu) / sigma_sqr
-          weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
-          B = weighted_X.sum(0).sum(-1) / N
-          grad = torch.inverse(A).T + B
-          return grad, y_time
 
         if TIME:
           a_start = time()
@@ -261,10 +263,64 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         ga_start = time()
         if VERBOSE: print(A.view(-1))
         
-        if False: # TODO: should I update w per GD step?
-          Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr)
-
+        # TODO: should I update them as well?
         pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
+
+        if TIME:
+          a_start = time()
+          obj_start = time()
+
+        optimizer.zero_grad()
+        obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+        obj *= -1
+        objs[-1] += obj.item(),
+        if TIME:
+          time_obj += time() - obj_start,
+        if VERBOSE:
+          print('iter {}: obj= {:.5f}'.format(i, obj.item()))
+
+        obj.backward()
+        optimizer.step()
+        # _, ss, _ = torch.svd(A)
+        # A /= ss[0]
+        if TIME:
+          time_A += time() - a_start,
+          time_GA += time() - ga_start,
+        grad_norms += torch.norm(A.grad).item(),
+
+        sgd_grad = A.grad
+        grad, y_time = get_grad(X, A, w, mu, sigma_sqr)
+        # print('A:', A.view(-1))
+        
+      A = A.detach()
+      pi = pi.detach()
+      mu = mu.detach()
+      sigma_sqr = sigma_sqr.detach()
+      w = w.detach()
+
+      # normalize
+      _, ss, _ = torch.svd(A)
+      A = A/ss[0]
+
+    elif A_mode == 'torchAll': # gradient ascent with torch
+      if CHECK_OBJ:
+        obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+        objs[-1] += obj.item(),
+
+      A.requires_grad = True
+      pi.requires_grad = True
+      mu.requires_grad = True
+      sigma_sqr.requires_grad = True
+      w.requires_grad = True
+
+      optimizer = optim.SGD([A, pi, mu, sigma_sqr, w], lr=gamma)
+
+      for i in range(n_gd_steps):
+        ga_start = time()
+        if VERBOSE: print(A.view(-1))
+        
+        # TODO: should I update them as well?
+        # pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
 
         if TIME:
           a_start = time()
@@ -286,12 +342,21 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
           time_A += time() - a_start,
           time_GA += time() - ga_start,
         grad_norms += torch.norm(A.grad).item(),
+        # print('A:', A.view(-1))
+
         
       A = A.detach()
       pi = pi.detach()
       mu = mu.detach()
       sigma_sqr = sigma_sqr.detach()
       w = w.detach()
+
+      # normalize
+      _, ss, _ = torch.svd(A)
+      A = A/ss[0]
+      pi[pi < 0] = SMALL
+      pi /= pi.sum(1, keepdim=True)
+
 
     elif A_mode == 'ICA':
       # NOTE: passing in Y as an argument since A is not explicitly calculated.
@@ -352,6 +417,7 @@ def eval_NLL(X):
   return NLL.item()
 
 def eval_KL(X, pi, mu, sigma_sqr):
+  # pdb.set_trace()
   N, D = X.shape
   exponents_normal = -0.5 * (X**2).sum(1)
   log_prob_normal = -0.5 * D * np.log(2*np.pi) + exponents_normal
