@@ -21,14 +21,14 @@ parser.add_argument('--gamma-min', type=float, default=0.001)
 parser.add_argument('--n-steps', type=int, default=50)
 parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
-parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'CF', 'ICA'])
+parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'torchGA', 'CF', 'ICA'])
 parser.add_argument('--data', type=str, default='GM', choices=[
        # connected
        'normal', 'scaledNormal', 'rotatedNormal', 'ring',
        # disconnected
        'GM', 'GM_scale1', 'GM_scale2', 'GMn2', 'concentric',
        # UCI
-       'gas16_co', 'gas16_methane', 'gas8_co', 'gas8_co_normed',
+       'gas16_co', 'gas16_methane', 'gas8_co', 'gas8_co_normed', 'miniboone',
        ])
 parser.add_argument('--save-token', type=str, default='')
 parser.add_argument('--save-dir', type=str)
@@ -98,7 +98,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     time_obj, n_iters_btls = [], []
   for i in range(n_steps):
     iter_start = time()
-    print('iteration', i)
+    print('iteration {} - data={} - mode={}'.format(i, args.data, args.mode))
     if A_mode == 'ICA':
       Y, A, pi, mu, sigma_sqr, avg_time = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
                 A_mode=A_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
@@ -107,6 +107,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       if A_mode == 'random':
         A = ortho_group.rvs(D)
       else:
+        # A_mode = 'GA' or 'torchGA'
         if TIME:
           em_start = time()
         X, A, pi, mu, sigma_sqr, grad_norms, objs, avg_time = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
@@ -201,6 +202,17 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         np.save(os.path.join(args.save_dir, 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr)
       if TIME:
         time_save += time() - save_start,
+      # NLL + KL
+      np.save(os.path.join(args.save_dir, 'NLLs.npy'), np.array(NLLs))
+      plt.plot(NLLs)
+      plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL.png'))
+      plt.close()
+      KLs = np.array(KLs)
+      np.save(os.path.join(args.save_dir, 'KLs.npy'), KLs)
+      plt.plot(np.log(KLs))
+      plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log.png'))
+      plt.close()
+
     if TIME:
       time_iter += time() - iter_start,
       print("Timing (data={} / K={} / n_pts={} ):".format(args.data, args.K, args.n_pts))
@@ -260,7 +272,7 @@ if __name__ == '__main__':
 
   data_dir = './datasets/'
   ga_token = ''
-  if args.mode == 'GA':
+  if args.mode in ['GA', 'torchGA']:
     if args.gamma == 0:
       ga_token = '_perturbed'
     elif args.gamma < 0:
@@ -324,6 +336,9 @@ if __name__ == '__main__':
     fdata = os.path.join(gas_dir, 'gas_train_normed.npy')
     # val: 94685 points
     fdata_val = os.path.join(gas_dir, 'gas_val_normed.npy')
+  elif data_token == 'miniboone':
+    fdata = 'miniboone/train_normed.npy'
+    fdata_val = 'miniboone/val_normed.npy'
   
   data_token += args.save_token
 

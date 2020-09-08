@@ -1,13 +1,23 @@
 #!/bin/bash
 
 # dataset='GaussianLine'
-dataset='GaussianMixture'
+# dataset='GaussianMixture'
 # dataset='uniform'
+dataset='GAS8'
+# dataset='miniboone'
 
-CUDA_VISIBLE_DEVICES=0 python -W ignore rbig.py \
+n_layer=10
+
+save_suffix='_data200k'
+
+CUDA_VISIBLE_DEVICES=1 python -W ignore rbig.py \
   --model='rbig' \
   --dataset=$dataset \
   --use-val=1 \
-  --dlen=100000 \
-  --bt=10000 \
-  --rotation-type='random'
+  --bt=15000 \
+  --rotation-type='PCA' \
+  --n-layer=$n_layer \
+  --save-suffix=$save_suffix
+
+#  --dlen=100000 \
+
