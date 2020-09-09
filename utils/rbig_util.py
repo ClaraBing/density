@@ -81,12 +81,14 @@ def compute_KL(x, datapoint, h):
   pdf = torch.exp(log_pdf)
   pdf /= pdf.sum()
   log_pdf = torch.log(pdf)
+  log_pdf[pdf==0] = 0
   # pdf = logistic_kernel_pdf(x, datapoint, h)
 
   log_pdf_normal = -0.5 * (x**2).sum(1) - -0.5 * D * np.log(2*np.pi)
   pdf_normal = torch.exp(log_pdf_normal)
   pdf_normal /= pdf_normal.sum()
   log_pdf_normal = torch.log(pdf_normal)
+  log_pdf_normal[pdf_normal==0] = 0
 
   kl = (pdf * (log_pdf - log_pdf_normal)).sum().item()
   return kl
