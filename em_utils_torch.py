@@ -438,7 +438,7 @@ def eval_KL(X, pi, mu, sigma_sqr):
   log_prob_curr = torch.log(prob)
 
   KL = (prob * (log_prob_curr - log_prob_normal)).sum().item()
-  if KL < 0:
+  if KL < -SMALL:
     print('ERROR: negative value of KL.')
     pdb.set_trace()
   return KL
