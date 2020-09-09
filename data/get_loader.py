@@ -64,8 +64,9 @@ def get_loader(args, is_train):
     n_train = int(0.8 * len(dset))
     n_val = len(dset) - n_train
     dset_train, dset_val = torch.utils.data.random_split(dset, [n_train, n_val])
-    return data.DataLoader(dset_train, args.bt, shuffle=True, num_workers=args.num_workers), \
-           data.DataLoader(dset_val, args.bt, shuffle=False, num_workers=args.num_workers)
+    train_loader = data.DataLoader(dset_train, args.bt, shuffle=True, num_workers=args.num_workers)
+    val_loader = data.DataLoader(dset_val, args.bt_test, shuffle=False, num_workers=args.num_workers)
+    return train_loader, val_loader
 
   return data.DataLoader(dset, args.bt, shuffle=is_train)
 

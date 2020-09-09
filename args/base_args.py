@@ -34,6 +34,7 @@ class BaseArgs:
                              'GaussianLine', 'GaussianMixture', 'uniform'])
     self.parser.add_argument('--num-workers', type=int, default=4)
     self.parser.add_argument('--bt', default=64, type=int, help='Batch size')
+    self.parser.add_argument('--bt-test', default=64, type=int, help='Test/val batch size')
     self.parser.add_argument('--dlen', default=1, type=int, 
                              help='Dataset length. Used for synthetic dataset e.g. GaussianLine.')
     self.parser.add_argument('--d', type=int, default=16,
