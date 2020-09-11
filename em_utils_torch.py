@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.optim as optim
+import torch.distributions as dists
 from scipy.stats import ortho_group, norm
 import matplotlib
 matplotlib.use('Agg')
@@ -372,8 +373,8 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
     # difference from the previous iterate
     dA, dsigma_sqr = torch.norm(A - A_prev), torch.norm(sigma_sqr.view(-1) - sigma_sqr_prev.view(-1))
 
-  print('#{}: dA={:.3e} / dsigma_sqr={:.3e}'.format(niters, dA, dsigma_sqr))
   if VERBOSE:
+    print('#{}: dA={:.3e} / dsigma_sqr={:.3e}'.format(niters, dA, dsigma_sqr))
     print('A:', A.view(-1))
 
   if TIME:
@@ -391,7 +392,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
     return Y.T, A, pi, mu, sigma_sqr, avg_time
   return X, A, pi, mu, sigma_sqr, grad_norms, objs, avg_time 
 
-def gaussianize_1d(X, pi, mu, sigma_sqr):
+def gaussianize_1d_old(X, pi, mu, sigma_sqr):
    N, D = X.shape
 
    scaled = (X.view(N, D, 1) - mu) / sigma_sqr**0.5
@@ -412,12 +413,107 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
 def eval_NLL(X):
   # evaluate the negative log likelihood of X coming from a standard normal.
   exponents = 0.5 * (X**2).sum(1)
-  if exponents.max() > 10:
-    print("NLL: exponents large.")
   NLL = 0.5 * X.shape[1] * np.log(2*np.pi) + exponents.mean()
   return NLL.item()
 
-def eval_KL(X, pi, mu, sigma_sqr):
+def logistic_kernel_cdf(x, datapoint, h):
+    n = datapoint.shape[0]
+    try:
+      log_cdfs = - F.softplus(-(x[None, ...] - datapoint[:, None, :]) / h[None, ...]) - np.log(n)
+      log_cdf = torch.logsumexp(log_cdfs, dim=0)
+      cdf = torch.exp(log_cdf).double()
+    except Exception as e:
+      print(e)
+      pdb.set_trace()
+    return cdf
+
+# return log(CDF)
+def logistic_kernel_log_cdf(x, datapoint, h):
+    n = datapoint.shape[0]
+    log_cdfs = - F.softplus(-(x[None, ...] - datapoint[:, None, :]) / h[None, ...]) - np.log(n)
+    log_cdf = torch.logsumexp(log_cdfs, dim=0)
+    return log_cdf.double()
+
+# return log(1-CDF)
+def logistic_kernel_log_sf(x, datapoint, h):
+    n = datapoint.shape[0]
+    log_sfs = - F.softplus((x[None, ...] - datapoint[:, None, :]) / h[None, ...]) - np.log(n)
+    log_sf = torch.logsumexp(log_sfs, dim=0)
+    return log_sf.double()
+
+normal_distribution = dists.Normal(0, 1)
+
+# compute inverse normal CDF
+# def logistic_inverse_normal_cdf(X, pi, mu, sigma):
+def gaussianize_1d(X, pi, mu, sigma_sqr):
+  mask_bound = 0.5e-7
+
+  N, D = X.shape
+
+  scaled = (X.view(N, D, 1) - mu) / sigma_sqr**0.5
+  scaled = scaled.cpu()
+  normal_cdf = to_tensor(norm.cdf(scaled))
+  cdf = (pi * normal_cdf).sum(-1)
+  log_cdfs = to_tensor(norm.logcdf(scaled))
+  log_cdf = torch.logsumexp(torch.log(pi) + log_cdfs, dim=-1)
+  log_sf = torch.log(1-cdf)
+
+  # Approximate Gaussian CDF
+  # inv(CDF) ~ np.sqrt(-2 * np.log(1-x)) #right, x -> 1
+  # inv(CDF) ~ -np.sqrt(-2 * np.log(x)) #left, x -> 0
+  # 1) Step1: invert good CDF
+  cdf_mask = ((cdf > mask_bound) & (cdf < 1 - (mask_bound))).double()
+  # Keep good CDF, mask the bad CDF values to 0.5(inverse(0.5)=0.)
+  cdf_good = cdf * cdf_mask + 0.5 * (1. - cdf_mask)
+  inverse_cdf = normal_distribution.icdf(cdf_good)
+
+  # 2) Step2: invert BAD large CDF
+  cdf_mask_right = (cdf >= 1. - (mask_bound)).double()
+  # Keep large bad CDF, mask the good and small bad CDF values to 0.
+  cdf_bad_right_log = log_sf * cdf_mask_right
+  inverse_cdf += torch.sqrt(-2. * cdf_bad_right_log)
+
+  # 3) Step3: invert BAD small CDF
+  cdf_mask_left = (cdf <= mask_bound).double()
+  # Keep small bad CDF, mask the good and large bad CDF values to 1.
+  cdf_bad_left_log = log_cdf * cdf_mask_left
+  inverse_cdf += (-torch.sqrt(-2 * cdf_bad_left_log))
+  if torch.isnan(inverse_cdf.max()) or torch.isnan(inverse_cdf.min()):
+    print('inverse CDF: NaN.')
+    pdb.set_trace()
+  if torch.isinf(inverse_cdf.max()) or torch.isinf(inverse_cdf.min()):
+    print('inverse CDF: Inf.')
+    pdb.set_trace()
+  return inverse_cdf, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right]
+
+
+def compute_log_det(Y, pi, mu, sigma_sqr, A,
+                    cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right):
+  N, D = Y.shape
+  scaled = (Y.view(N, D, 1) - mu) / sigma_sqr**0.5
+  log_pdfs = - 0.5 * scaled + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr)
+  log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
+
+  log_gaussian_derivative_good = dists.Normal(0, 1).log_prob(Y) * cdf_mask
+  cdf_l_bad_right_log = log_sf_l * cdf_mask_right + (-1.) * (1. - cdf_mask_right)
+  cdf_l_bad_left_log = log_cdf_l * cdf_mask_left + (-1.) * (1. - cdf_mask_left)
+  log_gaussian_derivative_left = (torch.log(torch.sqrt(-2 * cdf_l_bad_left_log))
+                                  - log_cdf_l) * cdf_mask_left
+  log_gaussian_derivative_right = (torch.log(torch.sqrt(-2. * cdf_l_bad_right_log))
+                                   - log_sf_l) * cdf_mask_right
+  log_gaussian_derivative = log_gaussian_derivative_good + log_gaussian_derivative_left + log_gaussian_derivative_right
+
+  log_det = (log_pdf - log_gaussian_derivative).sum() / N + torch.log(torch.abs(torch.det(A)))
+  return log_det
+
+def eval_KL(X, log_det):
+  N, D = X.shape
+  # term for std normal
+  log_probs = - (X**2).sum() - 0.5*D *np.log(2*np.pi)
+  KL = - log_probs / N - log_det
+  return KL
+
+def eval_KL_old(X, pi, mu, sigma_sqr):
   N, D = X.shape
   exponents_normal = -0.5 * (X**2).sum(1)
   log_prob_normal = -0.5 * D * np.log(2*np.pi) + exponents_normal
