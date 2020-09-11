@@ -55,23 +55,24 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
       data_anchors = [DATA]
       bandwidths = []
       vectors = []
+      kl_layer = [[] for _ in range(n_layer)]
       for batch_idx, data in enumerate(val_loader):
           if type(data) is list or type(data) is tuple:
             data = data[0]
           total += data.shape[0]
           data = data.type(DTYPE).to(device)
 
-          if batch_idx == 0:
+          if batch_idx == 0 and False: # TODO: remove this 
             # show original data
             if args.dataset in ['FashionMNIST', 'MNIST']:
               sampling(rotation_matrices, [], [],
                        image_name='images/RBIG_samples_{}_init.png'.format(args.dataset),
                        channel=channel, image_size=image_size, process_size=10)
-            elif args.dataset in ['GaussianLine', 'GaussianMixture', 'uniform']:
+            else:
+              # args.dataset in ['GaussianLine', 'GaussianMixture', 'uniform']:
               sampling(rotation_matrices, [], [],
                        image_name='images/RBIG_samples_{}_init.png'.format(args.dataset),
                        d=data.shape[1], sample_num=10000, process_size=100)
-
 
           if data.ndim == 4: # images
             data = dequantization(data, lambd)
@@ -149,14 +150,18 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
                     times['cur_data_proc'] += time() - proc_start,
                   cur_data = torch.cat(update_data_arrays, dim=0)
                   data_anchors.append(cur_data[:cur_data.shape[0]])
-              kl = compute_KL(data, data_anchors[prev_l], bandwidth)
-              print('layer {}: KL = {}'.format(prev_l, kl))
-              kls += kl,
+              # kl = compute_KL(data, data_anchors[prev_l], bandwidth)
+              # print('layer {}: KL = {}'.format(prev_l, kl))
+              # kls += kl,
+              kls += 0,
+              val_loss_curr_layer, val_log_prob_curr_layer = flow_loss(data, log_det)
+              kl_layer[prev_l] += val_loss_curr_layer.item(),
 
           if not FAIL_FLAG:
             if TIME:
               start = time()
             val_loss_r, val_log_prob_r = flow_loss(data, log_det)
+            print('')
             if TIME:
               times['flow_loss'] += time() - start,
             test_bpd_r = (val_loss_r.item() * data.shape[0] - log_det_logit) * (
@@ -168,13 +173,35 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
             if not SILENT and log_batch and batch_idx % 100 == 0:
                 print("Batch {} loss {} (log prob: {}) bpd {}".format(batch_idx, val_loss_r, val_log_prob, test_bpd_r))
 
+            kl_means = []
+            for li in range(n_layer):
+              curr = np.array(kl_layer[li])
+              print('Layer {}: mean={:.3e} / std={:.3e} / max={:.3e} / min={:.3e}'.format(
+                li, curr.mean(), curr.std(), curr.max(), curr.min()))
+              kl_means += curr.mean(),
+            print()
+            plt.plot(kl_means)
+            plt.savefig('{}/images/RBIG_KLbyLayer_{}_{}_run{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
             plt.close()
-            kls = np.array(kls)
-            plt.plot(np.log(kls))
-            plt.savefig('{}/images/RBIG_KLlog_{}_{}_layer{}_run{}_batch{}.png'.format(out_dir, args.dataset, args.rotation_type, prev_l, n_run, batch_idx))
-            plt.close()
+
+            if False: # TODO: check this
+              plt.close()
+              kls = np.array(kls)
+              plt.plot(np.log(kls))
+              plt.savefig('{}/images/RBIG_KLlog_{}_{}_layer{}_run{}_batch{}.png'.format(out_dir, args.dataset, args.rotation_type, prev_l, n_run, batch_idx))
+              plt.close()
           else:
             break
+
+      print('KL by layer.')
+      for li in range(n_layer):
+        kl_layer[li] = np.array(kl_layer[li])
+        print('Layer {}: mean={:.3e} / std={:.3e} / max={:.3e} / min={:.3e}'.format(
+           li, kl_layer[li].mean(), kl_layer[li].std(), kl_layer[li].max(), kl_layer[li].min()))
+      print()
+      plt.plot([each.mean() for each in kl_layer])
+      plt.savefig('{}/images/RBIG_KLbyLayer_{}_{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+      plt.close()
 
       if FAIL_FLAG:
         return None, None
@@ -198,9 +225,10 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
           plt.ylim([-2.5, 2.5])
           plt.savefig('{}/images/RBIG_transformed_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, li, n_run))
           plt.close()
-        sampling(rotation_matrices, data_anchors.copy(), bandwidths.copy(),
-                 image_name='{}/images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, args.n_layer, n_run),
-                 d=data.shape[1], sample_num=10000, process_size=100)
+        if False: # TODO: remove this
+          sampling(rotation_matrices, data_anchors.copy(), bandwidths.copy(),
+                   image_name='{}/images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, args.n_layer, n_run),
+                   d=data.shape[1], sample_num=10000, process_size=100)
       if TIME:
         times['sampling'] += time() - start,
 
@@ -265,7 +293,7 @@ if __name__ == '__main__':
       print(i)
     set_seed()
     out_dir = os.path.join('outputs/', 'RBIG', args.dataset)
-    out_dir = os.path.join(out_dir, '{}_L{}_bt{}{}_run{}'.format(args.rotation_type, args.n_layer, args.bt, args.save_suffix, i))
+    out_dir = os.path.join(out_dir, '{}_L{}_bt{}{}'.format(args.rotation_type, args.n_layer, args.bt, args.save_suffix))
     if os.path.exists(out_dir):
       print('Dir exist:', out_dir)
       proceed = input("Do you want to proceed? (y/N)")
