@@ -64,7 +64,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
 
   END = lambda dA, dsigma_sqr: (dA + dsigma_sqr) < threshold
 
-  Y = None
   if A_mode == 'ICA':
     cov = X.T.matmul(X) / len(X)
     cnt = 0
@@ -90,7 +89,12 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
       print('ICA failed. Use random.')
       A = to_tensor(ortho_group.rvs(D))
       Y = A.matmul(X)
-  
+
+    Y, w, w_sumN, w_sumNK = E(X, pi, mu, sigma_sqr, Y=Y)
+    pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
+    return Y.T, A, pi, mu, sigma_sqr
+
+  Y = None
   niters = 0
   dA, dsigma_sqr = 10, 10
   avg_time = {}
@@ -98,76 +102,17 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
   time_obj, n_iters_btls = [], []
   grad_norms = []
   objs = []
+
   while (not END(dA, dsigma_sqr)) and niters < max_em_steps:
     niters += 1
     A_prev, sigma_sqr_prev = A.clone(), sigma_sqr.clone()
     objs += [],
 
-    def E(pi, mu, sigma_sqr, Y=None):
-      # E-step - update posterior counts
-      if Y is None:
-        Y = A.matmul(X.T) # D x N
-
-      diff_square = (Y.T.view(N, D, 1) - mu)**2
-      exponents = diff_square / sigma_sqr
-      exp = torch.exp(-0.5 * exponents)
-      w = exp * pi / (sigma_sqr**0.5)
-      Ksum = w.sum(-1, keepdim=True)
-      Ksum[Ksum<SMALL] = SMALL
-      w = w / Ksum
-
-      w_sumN = w.sum(0)
-      w_sumNK = w_sumN.sum(-1)
-      w_sumN[w_sumN < SMALL] = SMALL
-      w_sumNK[w_sumNK < SMALL] = SMALL
-      return Y, w, w_sumN, w_sumNK
-
-    def update_pi_mu_sigma(X, A, w_sumN, w_sumNK, Y=None):
-      if Y is None:
-        Y = A.matmul(X.T) # D x N
-      pi = w_sumN / w_sumNK.view(-1, 1)
-      mu = (Y.T.view(N, D, 1) * w).sum(0) / w_sumN
-      diff_square = (Y.T.view(N, D, 1) - mu)**2
-      sigma_sqr = (w * diff_square).sum(0) / w_sumN
-      mu[torch.abs(mu) < SMALL] = SMALL 
-      sigma_sqr[sigma_sqr < SMALL] = SMALL
-      return pi, mu, sigma_sqr
-
-    def get_objetive(X, A, pi, mu, sigma_sqr, w, Y=None):
-      if Y is None:
-        Y = A.matmul(X.T)
-      Y = Y.T
-      exponents = (Y.view(N, D, 1) - mu)**2 / sigma_sqr
-      exp = torch.exp(-0.5 * exponents) / (2*np.pi * sigma_sqr)**(1/2)
-      # pi = torch.max(pi, to_tensor(np.array([0.])))
-      prob = (exp * pi).sum(-1)
-      log = torch.log(prob) 
-      log[prob == 0] = 0 # mask out NaN
-      obj = log.sum() / N + torch.log(torch.abs(torch.det(A)))
-      if torch.isnan(obj):
-        print('objective is NaN.') 
-        pdb.set_trace()
-      return obj
-
-    def get_grad(X, A, w, mu, sigma_sqr):
-      if TIME:
-        y_start = time()
-      Y = A.matmul(X.T)
-      if TIME:
-        y_time = time() - y_start
-      else:
-        y_time = 0
-
-      scaled = (-Y.T.view(N, D, 1) + mu) / sigma_sqr
-      weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
-      B = weighted_X.sum(0).sum(-1) / N
-      grad = torch.inverse(A).T + B
-      return grad, y_time
 
     if TIME:
       e_start = time()
 
-    Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr, Y=Y)
+    Y, w, w_sumN, w_sumNK = E(X, pi, mu, sigma_sqr, Y=Y)
     if TIME:
       time_E += time() - e_start,
 
@@ -181,9 +126,9 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         if VERBOSE: print(A.view(-1))
         
         if False: # TODO: should I update w per GD step?
-          Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr)
+          Y, w, w_sumN, w_sumNK = E(X, pi, mu, sigma_sqr)
 
-        pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
+        pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
 
 
         if TIME:
@@ -265,7 +210,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         if VERBOSE: print(A.view(-1))
         
         # TODO: should I update them as well?
-        pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
+        pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
 
         if TIME:
           a_start = time()
@@ -363,8 +308,8 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
 
     elif A_mode == 'ICA':
       # NOTE: passing in Y as an argument since A is not explicitly calculated.
-      Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr, Y=Y)
-      pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK, Y=Y)
+      Y, w, w_sumN, w_sumNK = E(X, pi, mu, sigma_sqr, Y=Y)
+      pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
       
 
     elif A_mode == 'CF': # closed form
@@ -392,6 +337,73 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
     return Y.T, A, pi, mu, sigma_sqr, avg_time
   return X, A, pi, mu, sigma_sqr, grad_norms, objs, avg_time 
 
+# util funcs in EM steps
+def E(X, pi, mu, sigma_sqr, Y=None):
+  N, D = X.shape
+  # E-step - update posterior counts
+  if Y is None:
+    Y = A.matmul(X.T) # D x N
+
+  diff_square = (Y.T.view(N, D, 1) - mu)**2
+  exponents = diff_square / sigma_sqr
+  exp = torch.exp(-0.5 * exponents)
+  w = exp * pi / (sigma_sqr**0.5)
+  Ksum = w.sum(-1, keepdim=True)
+  Ksum[Ksum<SMALL] = SMALL
+  w = w / Ksum
+
+  w_sumN = w.sum(0)
+  w_sumNK = w_sumN.sum(-1)
+  w_sumN[w_sumN < SMALL] = SMALL
+  w_sumNK[w_sumNK < SMALL] = SMALL
+  return Y, w, w_sumN, w_sumNK
+
+def update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=None):
+  N, D = X.shape
+  if Y is None:
+    Y = A.matmul(X.T) # D x N
+  pi = w_sumN / w_sumNK.view(-1, 1)
+  mu = (Y.T.view(N, D, 1) * w).sum(0) / w_sumN
+  diff_square = (Y.T.view(N, D, 1) - mu)**2
+  sigma_sqr = (w * diff_square).sum(0) / w_sumN
+  mu[torch.abs(mu) < SMALL] = SMALL 
+  sigma_sqr[sigma_sqr < SMALL] = SMALL
+  return pi, mu, sigma_sqr
+
+def get_objetive(X, A, pi, mu, sigma_sqr, w, Y=None):
+  N, D = X.shape
+  if Y is None:
+    Y = A.matmul(X.T)
+  Y = Y.T
+  exponents = (Y.view(N, D, 1) - mu)**2 / sigma_sqr
+  exp = torch.exp(-0.5 * exponents) / (2*np.pi * sigma_sqr)**(1/2)
+  # pi = torch.max(pi, to_tensor(np.array([0.])))
+  prob = (exp * pi).sum(-1)
+  log = torch.log(prob) 
+  log[prob == 0] = 0 # mask out NaN
+  obj = log.sum() / N + torch.log(torch.abs(torch.det(A)))
+  if torch.isnan(obj):
+    print('objective is NaN.') 
+    pdb.set_trace()
+  return obj
+
+def get_grad(X, A, w, mu, sigma_sqr):
+  N, D = X.shape
+  if TIME:
+    y_start = time()
+  Y = A.matmul(X.T)
+  if TIME:
+    y_time = time() - y_start
+  else:
+    y_time = 0
+
+  scaled = (-Y.T.view(N, D, 1) + mu) / sigma_sqr
+  weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
+  B = weighted_X.sum(0).sum(-1) / N
+  grad = torch.inverse(A).T + B
+  return grad, y_time
+
+
 def gaussianize_1d_old(X, pi, mu, sigma_sqr):
    N, D = X.shape
 
@@ -416,35 +428,9 @@ def eval_NLL(X):
   NLL = 0.5 * X.shape[1] * np.log(2*np.pi) + exponents.mean()
   return NLL.item()
 
-def logistic_kernel_cdf(x, datapoint, h):
-    n = datapoint.shape[0]
-    try:
-      log_cdfs = - F.softplus(-(x[None, ...] - datapoint[:, None, :]) / h[None, ...]) - np.log(n)
-      log_cdf = torch.logsumexp(log_cdfs, dim=0)
-      cdf = torch.exp(log_cdf).double()
-    except Exception as e:
-      print(e)
-      pdb.set_trace()
-    return cdf
-
-# return log(CDF)
-def logistic_kernel_log_cdf(x, datapoint, h):
-    n = datapoint.shape[0]
-    log_cdfs = - F.softplus(-(x[None, ...] - datapoint[:, None, :]) / h[None, ...]) - np.log(n)
-    log_cdf = torch.logsumexp(log_cdfs, dim=0)
-    return log_cdf.double()
-
-# return log(1-CDF)
-def logistic_kernel_log_sf(x, datapoint, h):
-    n = datapoint.shape[0]
-    log_sfs = - F.softplus((x[None, ...] - datapoint[:, None, :]) / h[None, ...]) - np.log(n)
-    log_sf = torch.logsumexp(log_sfs, dim=0)
-    return log_sf.double()
-
 normal_distribution = dists.Normal(0, 1)
 
 # compute inverse normal CDF
-# def logistic_inverse_normal_cdf(X, pi, mu, sigma):
 def gaussianize_1d(X, pi, mu, sigma_sqr):
   mask_bound = 0.5e-7
 
@@ -456,7 +442,8 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
   cdf = (pi * normal_cdf).sum(-1)
   log_cdfs = to_tensor(norm.logcdf(scaled))
   log_cdf = torch.logsumexp(torch.log(pi) + log_cdfs, dim=-1)
-  log_sf = torch.log(1-cdf)
+  log_sfs = to_tensor(norm.logcdf(-1*scaled))
+  log_sf = torch.logsumexp(torch.log(pi) + log_sfs, dim=-1)
 
   # Approximate Gaussian CDF
   # inv(CDF) ~ np.sqrt(-2 * np.log(1-x)) #right, x -> 1
