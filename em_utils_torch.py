@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.optim as optim
+import torch.distributions as dists
 from scipy.stats import ortho_group, norm
 import matplotlib
 matplotlib.use('Agg')
@@ -63,7 +64,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
 
   END = lambda dA, dsigma_sqr: (dA + dsigma_sqr) < threshold
 
-  Y = None
   if A_mode == 'ICA':
     cov = X.T.matmul(X) / len(X)
     cnt = 0
@@ -89,7 +89,12 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
       print('ICA failed. Use random.')
       A = to_tensor(ortho_group.rvs(D))
       Y = A.matmul(X)
-  
+
+    Y, w, w_sumN, w_sumNK = E(X, pi, mu, sigma_sqr, Y=Y)
+    pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
+    return Y.T, A, pi, mu, sigma_sqr
+
+  Y = None
   niters = 0
   dA, dsigma_sqr = 10, 10
   avg_time = {}
@@ -97,76 +102,17 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
   time_obj, n_iters_btls = [], []
   grad_norms = []
   objs = []
+
   while (not END(dA, dsigma_sqr)) and niters < max_em_steps:
     niters += 1
     A_prev, sigma_sqr_prev = A.clone(), sigma_sqr.clone()
     objs += [],
 
-    def E(pi, mu, sigma_sqr, Y=None):
-      # E-step - update posterior counts
-      if Y is None:
-        Y = A.matmul(X.T) # D x N
-
-      diff_square = (Y.T.view(N, D, 1) - mu)**2
-      exponents = diff_square / sigma_sqr
-      exp = torch.exp(-0.5 * exponents)
-      w = exp * pi / (sigma_sqr**0.5)
-      Ksum = w.sum(-1, keepdim=True)
-      Ksum[Ksum<SMALL] = SMALL
-      w = w / Ksum
-
-      w_sumN = w.sum(0)
-      w_sumNK = w_sumN.sum(-1)
-      w_sumN[w_sumN < SMALL] = SMALL
-      w_sumNK[w_sumNK < SMALL] = SMALL
-      return Y, w, w_sumN, w_sumNK
-
-    def update_pi_mu_sigma(X, A, w_sumN, w_sumNK, Y=None):
-      if Y is None:
-        Y = A.matmul(X.T) # D x N
-      pi = w_sumN / w_sumNK.view(-1, 1)
-      mu = (Y.T.view(N, D, 1) * w).sum(0) / w_sumN
-      diff_square = (Y.T.view(N, D, 1) - mu)**2
-      sigma_sqr = (w * diff_square).sum(0) / w_sumN
-      mu[torch.abs(mu) < SMALL] = SMALL 
-      sigma_sqr[sigma_sqr < SMALL] = SMALL
-      return pi, mu, sigma_sqr
-
-    def get_objetive(X, A, pi, mu, sigma_sqr, w, Y=None):
-      if Y is None:
-        Y = A.matmul(X.T)
-      Y = Y.T
-      exponents = (Y.view(N, D, 1) - mu)**2 / sigma_sqr
-      exp = torch.exp(-0.5 * exponents) / (2*np.pi * sigma_sqr)**(1/2)
-      # pi = torch.max(pi, to_tensor(np.array([0.])))
-      prob = (exp * pi).sum(-1)
-      log = torch.log(prob) 
-      log[prob == 0] = 0 # mask out NaN
-      obj = log.sum() / N + torch.log(torch.abs(torch.det(A)))
-      if torch.isnan(obj):
-        print('objective is NaN.') 
-        pdb.set_trace()
-      return obj
-
-    def get_grad(X, A, w, mu, sigma_sqr):
-      if TIME:
-        y_start = time()
-      Y = A.matmul(X.T)
-      if TIME:
-        y_time = time() - y_start
-      else:
-        y_time = 0
-
-      scaled = (-Y.T.view(N, D, 1) + mu) / sigma_sqr
-      weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
-      B = weighted_X.sum(0).sum(-1) / N
-      grad = torch.inverse(A).T + B
-      return grad, y_time
 
     if TIME:
       e_start = time()
 
-    Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr, Y=Y)
+    Y, w, w_sumN, w_sumNK = E(X, pi, mu, sigma_sqr, Y=Y)
     if TIME:
       time_E += time() - e_start,
 
@@ -180,9 +126,9 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         if VERBOSE: print(A.view(-1))
         
         if False: # TODO: should I update w per GD step?
-          Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr)
+          Y, w, w_sumN, w_sumNK = E(X, pi, mu, sigma_sqr)
 
-        pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
+        pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
 
 
         if TIME:
@@ -265,7 +211,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         if VERBOSE: print(A.view(-1))
         
         # TODO: should I update them as well?
-        pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
+        pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
 
         if TIME:
           a_start = time()
@@ -363,8 +309,8 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
 
     elif A_mode == 'ICA':
       # NOTE: passing in Y as an argument since A is not explicitly calculated.
-      Y, w, w_sumN, w_sumNK = E(pi, mu, sigma_sqr, Y=Y)
-      pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK, Y=Y)
+      Y, w, w_sumN, w_sumNK = E(X, pi, mu, sigma_sqr, Y=Y)
+      pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
       
 
     elif A_mode == 'CF': # closed form
@@ -373,8 +319,8 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
     # difference from the previous iterate
     dA, dsigma_sqr = torch.norm(A - A_prev), torch.norm(sigma_sqr.view(-1) - sigma_sqr_prev.view(-1))
 
-  print('#{}: dA={:.3e} / dsigma_sqr={:.3e}'.format(niters, dA, dsigma_sqr))
   if VERBOSE:
+    print('#{}: dA={:.3e} / dsigma_sqr={:.3e}'.format(niters, dA, dsigma_sqr))
     print('A:', A.view(-1))
 
   if TIME:
@@ -392,7 +338,74 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
     return Y.T, A, pi, mu, sigma_sqr, avg_time
   return X, A, pi, mu, sigma_sqr, grad_norms, objs, avg_time 
 
-def gaussianize_1d(X, pi, mu, sigma_sqr):
+# util funcs in EM steps
+def E(X, pi, mu, sigma_sqr, Y=None):
+  N, D = X.shape
+  # E-step - update posterior counts
+  if Y is None:
+    Y = A.matmul(X.T) # D x N
+
+  diff_square = (Y.T.view(N, D, 1) - mu)**2
+  exponents = diff_square / sigma_sqr
+  exp = torch.exp(-0.5 * exponents)
+  w = exp * pi / (sigma_sqr**0.5)
+  Ksum = w.sum(-1, keepdim=True)
+  Ksum[Ksum<SMALL] = SMALL
+  w = w / Ksum
+
+  w_sumN = w.sum(0)
+  w_sumNK = w_sumN.sum(-1)
+  w_sumN[w_sumN < SMALL] = SMALL
+  w_sumNK[w_sumNK < SMALL] = SMALL
+  return Y, w, w_sumN, w_sumNK
+
+def update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=None):
+  N, D = X.shape
+  if Y is None:
+    Y = A.matmul(X.T) # D x N
+  pi = w_sumN / w_sumNK.view(-1, 1)
+  mu = (Y.T.view(N, D, 1) * w).sum(0) / w_sumN
+  diff_square = (Y.T.view(N, D, 1) - mu)**2
+  sigma_sqr = (w * diff_square).sum(0) / w_sumN
+  mu[torch.abs(mu) < SMALL] = SMALL 
+  sigma_sqr[sigma_sqr < SMALL] = SMALL
+  return pi, mu, sigma_sqr
+
+def get_objetive(X, A, pi, mu, sigma_sqr, w, Y=None):
+  N, D = X.shape
+  if Y is None:
+    Y = A.matmul(X.T)
+  Y = Y.T
+  exponents = (Y.view(N, D, 1) - mu)**2 / sigma_sqr
+  exp = torch.exp(-0.5 * exponents) / (2*np.pi * sigma_sqr)**(1/2)
+  # pi = torch.max(pi, to_tensor(np.array([0.])))
+  prob = (exp * pi).sum(-1)
+  log = torch.log(prob) 
+  log[prob == 0] = 0 # mask out NaN
+  obj = log.sum() / N + torch.log(torch.abs(torch.det(A)))
+  if torch.isnan(obj):
+    print('objective is NaN.') 
+    pdb.set_trace()
+  return obj
+
+def get_grad(X, A, w, mu, sigma_sqr):
+  N, D = X.shape
+  if TIME:
+    y_start = time()
+  Y = A.matmul(X.T)
+  if TIME:
+    y_time = time() - y_start
+  else:
+    y_time = 0
+
+  scaled = (-Y.T.view(N, D, 1) + mu) / sigma_sqr
+  weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
+  B = weighted_X.sum(0).sum(-1) / N
+  grad = torch.inverse(A).T + B
+  return grad, y_time
+
+
+def gaussianize_1d_old(X, pi, mu, sigma_sqr):
    N, D = X.shape
 
    scaled = (X.view(N, D, 1) - mu) / sigma_sqr**0.5
@@ -413,12 +426,82 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
 def eval_NLL(X):
   # evaluate the negative log likelihood of X coming from a standard normal.
   exponents = 0.5 * (X**2).sum(1)
-  if exponents.max() > 10:
-    print("NLL: exponents large.")
   NLL = 0.5 * X.shape[1] * np.log(2*np.pi) + exponents.mean()
   return NLL.item()
 
-def eval_KL(X, pi, mu, sigma_sqr):
+normal_distribution = dists.Normal(0, 1)
+
+# compute inverse normal CDF
+def gaussianize_1d(X, pi, mu, sigma_sqr):
+  mask_bound = 0.5e-7
+
+  N, D = X.shape
+
+  scaled = (X.view(N, D, 1) - mu) / sigma_sqr**0.5
+  scaled = scaled.cpu()
+  normal_cdf = to_tensor(norm.cdf(scaled))
+  cdf = (pi * normal_cdf).sum(-1)
+  log_cdfs = to_tensor(norm.logcdf(scaled))
+  log_cdf = torch.logsumexp(torch.log(pi) + log_cdfs, dim=-1)
+  log_sfs = to_tensor(norm.logcdf(-1*scaled))
+  log_sf = torch.logsumexp(torch.log(pi) + log_sfs, dim=-1)
+
+  # Approximate Gaussian CDF
+  # inv(CDF) ~ np.sqrt(-2 * np.log(1-x)) #right, x -> 1
+  # inv(CDF) ~ -np.sqrt(-2 * np.log(x)) #left, x -> 0
+  # 1) Step1: invert good CDF
+  cdf_mask = ((cdf > mask_bound) & (cdf < 1 - (mask_bound))).double()
+  # Keep good CDF, mask the bad CDF values to 0.5(inverse(0.5)=0.)
+  cdf_good = cdf * cdf_mask + 0.5 * (1. - cdf_mask)
+  inverse_cdf = normal_distribution.icdf(cdf_good)
+
+  # 2) Step2: invert BAD large CDF
+  cdf_mask_right = (cdf >= 1. - (mask_bound)).double()
+  # Keep large bad CDF, mask the good and small bad CDF values to 0.
+  cdf_bad_right_log = log_sf * cdf_mask_right
+  inverse_cdf += torch.sqrt(-2. * cdf_bad_right_log)
+
+  # 3) Step3: invert BAD small CDF
+  cdf_mask_left = (cdf <= mask_bound).double()
+  # Keep small bad CDF, mask the good and large bad CDF values to 1.
+  cdf_bad_left_log = log_cdf * cdf_mask_left
+  inverse_cdf += (-torch.sqrt(-2 * cdf_bad_left_log))
+  if torch.isnan(inverse_cdf.max()) or torch.isnan(inverse_cdf.min()):
+    print('inverse CDF: NaN.')
+    pdb.set_trace()
+  if torch.isinf(inverse_cdf.max()) or torch.isinf(inverse_cdf.min()):
+    print('inverse CDF: Inf.')
+    pdb.set_trace()
+  return inverse_cdf, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right]
+
+
+def compute_log_det(Y, pi, mu, sigma_sqr, A,
+                    cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right):
+  N, D = Y.shape
+  scaled = (Y.view(N, D, 1) - mu) / sigma_sqr**0.5
+  log_pdfs = - 0.5 * scaled + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr)
+  log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
+
+  log_gaussian_derivative_good = dists.Normal(0, 1).log_prob(Y) * cdf_mask
+  cdf_l_bad_right_log = log_sf_l * cdf_mask_right + (-1.) * (1. - cdf_mask_right)
+  cdf_l_bad_left_log = log_cdf_l * cdf_mask_left + (-1.) * (1. - cdf_mask_left)
+  log_gaussian_derivative_left = (torch.log(torch.sqrt(-2 * cdf_l_bad_left_log))
+                                  - log_cdf_l) * cdf_mask_left
+  log_gaussian_derivative_right = (torch.log(torch.sqrt(-2. * cdf_l_bad_right_log))
+                                   - log_sf_l) * cdf_mask_right
+  log_gaussian_derivative = log_gaussian_derivative_good + log_gaussian_derivative_left + log_gaussian_derivative_right
+
+  log_det = (log_pdf - log_gaussian_derivative).sum() / N + torch.log(torch.abs(torch.det(A)))
+  return log_det
+
+def eval_KL(X, log_det):
+  N, D = X.shape
+  # term for std normal
+  log_probs = - (X**2).sum() - 0.5*D *np.log(2*np.pi)
+  KL = - log_probs / N - log_det
+  return KL
+
+def eval_KL_old(X, pi, mu, sigma_sqr):
   N, D = X.shape
   exponents_normal = -0.5 * (X**2).sum(1)
   log_prob_normal = -0.5 * D * np.log(2*np.pi) + exponents_normal
@@ -439,7 +522,7 @@ def eval_KL(X, pi, mu, sigma_sqr):
   log_prob_curr = torch.log(prob)
 
   KL = (prob * (log_prob_curr - log_prob_normal)).sum().item()
-  if KL < 0:
+  if KL < -SMALL:
     print('ERROR: negative value of KL.')
     pdb.set_trace()
   return KL

@@ -42,6 +42,8 @@ elif args.lib == 'torch':
   from em_utils_torch import *
 
 SAVE_ROOT = 'runs_gaussianization'
+PRINT_NLL = False
+VERBOSE = False
 
 TIME=args.time
 CHECK_OBJ=args.check_obj
@@ -71,18 +73,23 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   NLLs, KLs = [], []
   NLLs_test, KLs_test = [], []
 
+  log_det, log_det_test = 0, 0
+
   # get initial metrics
   # train
   nll = eval_NLL(X)
   NLLs += nll,
-  kl = eval_KL(X, pi, mu, sigma_sqr)
+  # kl = eval_KL(X, pi, mu, sigma_sqr)
+  kl = eval_KL(X, log_det)
   KLs += kl,
   print('Initial NLL:', nll)
   print('Inital KL:', kl)
+  print()
   # test
   nll_test = eval_NLL(Xtest)
   NLLs_test += nll_test,
-  kl_test = eval_KL(Xtest, pi, mu, sigma_sqr)
+  # kl_test = eval_KL(Xtest, pi, mu, sigma_sqr)
+  kl_test = eval_KL(X, log_det_test)
   KLs_test += kl_test,
   print('Initial NLL (test):', nll_test)
   print('Inital KL (test):', kl_test)
@@ -128,8 +135,9 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     else:
       Y = X.dot(A.T)
       Ytest = X.dot(A.T)
-    print('mu: mean={:.3e}/ std={:.3e}'.format(mu.mean(), mu.std()))
-    print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
+    if VERBOSE:
+      print('mu: mean={:.3e}/ std={:.3e}'.format(mu.mean(), mu.std()))
+      print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
     if CHECK_OBJ:
       for emi, obj in enumerate(objs):
         fimg = 'figs/objs/objs_step{}_em{}.png'.format(i, emi)
@@ -148,44 +156,56 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     if TIME:
       nll_start = time()
     nll = eval_NLL(Y)
-    kl = eval_KL(Y, pi, mu, sigma_sqr)
     if TIME:
       time_NLL += time() - nll_start,
-    print('NLL (Y):', nll)
-    print('KL (Y):', kl)
+    if PRINT_NLL:
+      print('NLL (Y):', nll)
+    # print('KL (Y):', kl)
 
     if TIME:
       g1d_start = time()
-    X = gaussianize_1d(Y, pi, mu, sigma_sqr)
+    X, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right] = gaussianize_1d(Y, pi, mu, sigma_sqr)
     if TIME:
       time_g1d += time() - g1d_start,
       nll_start = time()
     nll = eval_NLL(X)
-    kl = eval_KL(X, pi, mu, sigma_sqr)
+    # kl = eval_KL(X, pi, mu, sigma_sqr)
+    log_det += compute_log_det(Y, pi, mu, sigma_sqr, A, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right)
+    kl = eval_KL(X, log_det)
     if TIME:
       time_NLL += time() - nll_start,
     NLLs += nll,
     KLs += kl,
-    print('NLL:', nll)
-    print('KL:', kl)
+    if PRINT_NLL:
+      print('NLL:', nll)
+    print('KL:', kl.item())
 
     x = X
     fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)
+    if torch.isnan(x.max()) or torch.isnan(x.min()):
+      print('X: NaN')
+      pdb.set_trace()
     plot_hist(x, fimg)
 
     # check on test data
-    Xtest = gaussianize_1d(Ytest, pi, mu, sigma_sqr)
+    Xtest, cdf_mask_test, [log_cdf_test, cdf_mask_left_test], [log_sf_test, cdf_mask_right_test] = gaussianize_1d(Ytest, pi, mu, sigma_sqr)
     x = Xtest
     fimg = 'figs/hist2d_test_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)
+    if torch.isnan(x.max()) or torch.isnan(x.min()):
+      print('Xtest: NaN')
+      pdb.set_trace()
     plot_hist(x, fimg)
     nll_test = eval_NLL(Xtest)
-    kl_test = eval_KL(Xtest, pi, mu, sigma_sqr)
+    # kl_test = eval_KL(Xtest, pi, mu, sigma_sqr)
+    log_det_test += compute_log_det(Ytest, pi, mu, sigma_sqr, A, cdf_mask_left, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test)
+    kl_test = eval_KL(Xtest, log_det_test)
     NLLs_test += nll_test,
     KLs_test += kl_test,
-    print('NLL (test):', nll_test)
-    print('KL (test):', kl_test)
+    if PRINT_NLL:
+      print('NLL (test):', nll_test)
+    print('KL (test):', kl_test.item())
     print()
 
     if args.save_dir:
