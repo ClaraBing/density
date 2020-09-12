@@ -65,8 +65,6 @@ def logistic_kernel_pdf(x, datapoint, h):
     pdf = torch.exp(log_pdf)
     return pdf
 
-
-# unused
 def logistic_kernel_log_pdf(x, datapoint, h):
     n = datapoint.shape[0]
     log_pdfs = -(x[None, ...] - datapoint[:, None, :]) / h[:, None, :] - torch.log(h[:, None, :]) - \
@@ -93,7 +91,6 @@ def compute_KL(x, datapoint, h):
   kl = (pdf * (log_pdf - log_pdf_normal)).sum().item()
   return kl
 
-# unused
 def logistic_kernel_cdf(x, datapoint, h):
     n = datapoint.shape[0]
     try:
