@@ -121,8 +121,9 @@ def logistic_kernel_log_sf(x, datapoint, h):
 def compute_log_det(x, gaussianalized_x, datapoints, cdf_mask, log_cdf_l, cdf_mask_left,
                     log_sf_l, cdf_mask_right, h, squeeze=True):
     N = datapoints.shape[0]
-    log_pdfs = -(x[None, ...] - datapoints[:, None, :]) / h[None, ...] - torch.log(h[None, ...]) - \
-               2 * F.softplus(-(x[None, ...] - datapoints[:, None, :]) / h[None, ...]) - np.log(N)
+    log_pdfs = -(x[None, ...] - datapoints[:, None, :]) / h[None, ...] \
+               - torch.log(h[None, ...]) \
+               - 2 * F.softplus(-(x[None, ...] - datapoints[:, None, :]) / h[None, ...]) - np.log(N)
     log_pdf = torch.logsumexp(log_pdfs, dim=0).double()
 
     log_gaussian_derivative_good = tdist.Normal(0, 1).log_prob(gaussianalized_x) * cdf_mask

@@ -8,6 +8,7 @@
 dataset='GaussianMixture'
 dlen=50000
 
+dataset='GM'
 n_layer=10
 
 # save_suffix='_data200k_run1'
