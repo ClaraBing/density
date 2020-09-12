@@ -82,17 +82,19 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   # kl = eval_KL(X, pi, mu, sigma_sqr)
   kl = eval_KL(X, log_det)
   KLs += kl,
-  print('Initial NLL:', nll)
+  if PRINT_NLL:
+    print('Initial NLL:', nll)
   print('Inital KL:', kl)
-  print()
   # test
   nll_test = eval_NLL(Xtest)
   NLLs_test += nll_test,
   # kl_test = eval_KL(Xtest, pi, mu, sigma_sqr)
   kl_test = eval_KL(X, log_det_test)
   KLs_test += kl_test,
-  print('Initial NLL (test):', nll_test)
+  if PRINT_NLL:
+    print('Initial NLL (test):', nll_test)
   print('Inital KL (test):', kl_test)
+  print()
 
   grad_norms_total = []
   if TIME:
@@ -107,8 +109,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     iter_start = time()
     print('iteration {} - data={} - mode={}'.format(i, args.data, args.mode))
     if A_mode == 'ICA':
-      Y, A, pi, mu, sigma_sqr, avg_time = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
-                A_mode=A_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
+      A, pi, mu, sigma_sqr = update_ICA(X, K, gammas[i], A, pi, mu, sigma_sqr)
       objs = []
     else:
       if A_mode == 'random':
@@ -117,7 +118,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         # A_mode = 'GA' or 'torchGA'
         if TIME:
           em_start = time()
-        X, A, pi, mu, sigma_sqr, grad_norms, objs, avg_time = EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
+        A, pi, mu, sigma_sqr, grad_norms, objs, avg_time = update_EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
                   A_mode=A_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
         if TIME:
           time_em += time() - em_start,
@@ -129,12 +130,14 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
           n_iters_btls += avg_time['btls_nIters'],
         if args.mode == 'GA':
           grad_norms_total += np.array(grad_norms).mean(),
+
     if type(X) is torch.Tensor:
       Y = X.matmul(A.T)
       Ytest = Xtest.matmul(A.T)
     else:
       Y = X.dot(A.T)
-      Ytest = X.dot(A.T)
+      Ytest = Xtest.dot(A.T)
+
     if VERBOSE:
       print('mu: mean={:.3e}/ std={:.3e}'.format(mu.mean(), mu.std()))
       print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
@@ -199,7 +202,8 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     plot_hist(x, fimg)
     nll_test = eval_NLL(Xtest)
     # kl_test = eval_KL(Xtest, pi, mu, sigma_sqr)
-    log_det_test += compute_log_det(Ytest, pi, mu, sigma_sqr, A, cdf_mask_left, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test)
+    log_det_test += compute_log_det(Ytest, pi, mu, sigma_sqr, A, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test)
+    pdb.set_trace()
     kl_test = eval_KL(Xtest, log_det_test)
     NLLs_test += nll_test,
     KLs_test += kl_test,

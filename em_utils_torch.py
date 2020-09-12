@@ -52,7 +52,31 @@ def init_params(D, K, mu_low, mu_up):
   return A, pi, mu, sigma_sqr
 
 
-def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
+def update_ICA(X, K, gamma, A, pi, mu, sigma_sqr):
+  Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr)
+  pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
+
+  cov = X.T.matmul(X) / len(X)
+  cnt = 0
+  n_tries = 20
+  while cnt < n_tries:
+    try:
+      ica = FastICA()
+      Y = ica.fit_transform(X.cpu())
+      A = np.linalg.inv(ica.mixing_)
+      _, ss, _ = np.linalg.svd(A)
+      A = to_tensor(A / ss[0])
+      cnt = 2*n_tries
+    except:
+      cnt += 1
+  if cnt != 2*n_tries:
+    print('ICA failed. Use random.')
+    A = to_tensor(ortho_group.rvs(D))
+  return A, pi, mu, sigma_sqr
+
+
+
+def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
        max_em_steps=30, n_gd_steps=20):
   BACKTRACK = gamma < 0
 
@@ -63,36 +87,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
   N, D = X.shape
 
   END = lambda dA, dsigma_sqr: (dA + dsigma_sqr) < threshold
-
-  if A_mode == 'ICA':
-    cov = X.T.matmul(X) / len(X)
-    cnt = 0
-    n_tries = 20
-    while cnt < n_tries:
-      # multiple
-      try:
-        ica = FastICA()
-        Y = ica.fit_transform(X.cpu())
-        # Y = to_tensor(Y).T
-        _, ss, _ = np.linalg.svd(ica.mixing_)
-        # Y *= ss[0]
-        A = ica.mixing_ / ss[0]
-        A = np.linalg.inv(A)
-        A = to_tensor(A)
-        # A = to_tensor(torch.ica.mixing_)
-        Y = X.matmul(A.T)
-        Y = Y.T
-        cnt = 2*n_tries
-      except:
-        cnt += 1
-    if cnt != 2*n_tries:
-      print('ICA failed. Use random.')
-      A = to_tensor(ortho_group.rvs(D))
-      Y = A.matmul(X)
-
-    Y, w, w_sumN, w_sumNK = E(X, pi, mu, sigma_sqr, Y=Y)
-    pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
-    return Y.T, A, pi, mu, sigma_sqr
 
   Y = None
   niters = 0
@@ -112,7 +106,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
     if TIME:
       e_start = time()
 
-    Y, w, w_sumN, w_sumNK = E(X, pi, mu, sigma_sqr, Y=Y)
+    Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr, Y=Y)
     if TIME:
       time_E += time() - e_start,
 
@@ -126,7 +120,7 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         if VERBOSE: print(A.view(-1))
         
         if False: # TODO: should I update w per GD step?
-          Y, w, w_sumN, w_sumNK = E(X, pi, mu, sigma_sqr)
+          Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr)
 
         pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
 
@@ -198,11 +192,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         objs[-1] += obj.item(),
 
       A.requires_grad = True
-      # pi.requires_grad = False
-      # mu.requires_grad = False
-      # sigma_sqr.requires_grad = False
-      # w.requires_grad = False
-
       optimizer = optim.Adam([A], lr=gamma)
 
       for i in range(n_gd_steps):
@@ -266,9 +255,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         ga_start = time()
         if VERBOSE: print(A.view(-1))
         
-        # TODO: should I update them as well?
-        # pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w_sumN, w_sumNK)
-
         if TIME:
           a_start = time()
           obj_start = time()
@@ -305,13 +291,6 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
       pi[pi < 0] = SMALL
       pi /= pi.sum(1, keepdim=True)
 
-
-    elif A_mode == 'ICA':
-      # NOTE: passing in Y as an argument since A is not explicitly calculated.
-      Y, w, w_sumN, w_sumNK = E(X, pi, mu, sigma_sqr, Y=Y)
-      pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
-      
-
     elif A_mode == 'CF': # closed form
       raise NotImplementedError("mode CF: not implemented yet.")
            
@@ -332,19 +311,16 @@ def EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
       'btls_nIters': np.array(n_iters_btls).mean() if n_iters_btls else 0,
     }
 
-  if A_mode == 'ICA':
-    # NOTE: returning directly since no EM iteration is required.
-    return Y.T, A, pi, mu, sigma_sqr, avg_time
-  return X, A, pi, mu, sigma_sqr, grad_norms, objs, avg_time 
+  return A, pi, mu, sigma_sqr, grad_norms, objs, avg_time 
 
 # util funcs in EM steps
-def E(X, pi, mu, sigma_sqr, Y=None):
+def E(X, A, pi, mu, sigma_sqr, Y=None):
   N, D = X.shape
   # E-step - update posterior counts
   if Y is None:
     Y = A.matmul(X.T) # D x N
 
-  diff_square = (Y.T.view(N, D, 1) - mu)**2
+  diff_square = (Y.T.unsqueeze(-1) - mu)**2
   exponents = diff_square / sigma_sqr
   exp = torch.exp(-0.5 * exponents)
   w = exp * pi / (sigma_sqr**0.5)
@@ -363,8 +339,8 @@ def update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=None):
   if Y is None:
     Y = A.matmul(X.T) # D x N
   pi = w_sumN / w_sumNK.view(-1, 1)
-  mu = (Y.T.view(N, D, 1) * w).sum(0) / w_sumN
-  diff_square = (Y.T.view(N, D, 1) - mu)**2
+  mu = (Y.T.unsqueeze(-1) * w).sum(0) / w_sumN
+  diff_square = (Y.T.unsqueeze(-1) - mu)**2
   sigma_sqr = (w * diff_square).sum(0) / w_sumN
   mu[torch.abs(mu) < SMALL] = SMALL 
   sigma_sqr[sigma_sqr < SMALL] = SMALL
@@ -375,7 +351,7 @@ def get_objetive(X, A, pi, mu, sigma_sqr, w, Y=None):
   if Y is None:
     Y = A.matmul(X.T)
   Y = Y.T
-  exponents = (Y.view(N, D, 1) - mu)**2 / sigma_sqr
+  exponents = (Y.unsqueeze(-1) - mu)**2 / sigma_sqr
   exp = torch.exp(-0.5 * exponents) / (2*np.pi * sigma_sqr)**(1/2)
   # pi = torch.max(pi, to_tensor(np.array([0.])))
   prob = (exp * pi).sum(-1)
@@ -397,7 +373,7 @@ def get_grad(X, A, w, mu, sigma_sqr):
   else:
     y_time = 0
 
-  scaled = (-Y.T.view(N, D, 1) + mu) / sigma_sqr
+  scaled = (-Y.T.unsqueeze(-1) + mu) / sigma_sqr
   weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
   B = weighted_X.sum(0).sum(-1) / N
   grad = torch.inverse(A).T + B
@@ -407,7 +383,7 @@ def get_grad(X, A, w, mu, sigma_sqr):
 def gaussianize_1d_old(X, pi, mu, sigma_sqr):
    N, D = X.shape
 
-   scaled = (X.view(N, D, 1) - mu) / sigma_sqr**0.5
+   scaled = (X.unsqueeze(-1) - mu) / sigma_sqr**0.5
    scaled = scaled.cpu()
    cdf = norm.cdf(scaled)
    # remove outliers 
@@ -436,7 +412,8 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
 
   N, D = X.shape
 
-  scaled = (X.view(N, D, 1) - mu) / sigma_sqr**0.5
+  # for calculations please see: https://www.overleaf.com/6125358376rgmjjgdsmdmm
+  scaled = (X.unsqueeze(-1) - mu) / sigma_sqr**0.5
   scaled = scaled.cpu()
   normal_cdf = to_tensor(norm.cdf(scaled))
   cdf = (pi * normal_cdf).sum(-1)
@@ -477,8 +454,9 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
 def compute_log_det(Y, pi, mu, sigma_sqr, A,
                     cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right):
   N, D = Y.shape
-  scaled = (Y.view(N, D, 1) - mu) / sigma_sqr**0.5
-  log_pdfs = - 0.5 * scaled + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr)
+  # pdb.set_trace()
+  scaled = (Y.unsqueeze(-1) - mu) / sigma_sqr**0.5
+  log_pdfs = - 0.5 * scaled**2 + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr)
   log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
 
   log_gaussian_derivative_good = dists.Normal(0, 1).log_prob(Y) * cdf_mask
@@ -512,7 +490,7 @@ def eval_KL_old(X, pi, mu, sigma_sqr):
   # mu = torch.zeros_like(mu).to(device)
   # sigma_sqr = torch.ones_like(sigma_sqr).to(device)
 
-  exponents = - (X.view(N, D, 1) - mu)**2 / (2 * sigma_sqr)
+  exponents = - (X.unsqueeze(-1) - mu)**2 / (2 * sigma_sqr)
   prob = pi * (2*np.pi*sigma_sqr)**(-0.5) * torch.exp(exponents)
   prob = prob.sum(-1) # shape: N x D
   log_prob_curr = torch.log(prob).sum(-1)
