@@ -274,7 +274,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   plt.close()
   KLs = np.array(KLs)
   np.save(os.path.join(args.save_dir, 'KLs.npy'), KLs)
-  plt.plot(np.log(KLs))
+  plt.plot(KLs)
   plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log.png'))
   plt.close()
   # test
@@ -284,7 +284,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   plt.close()
   KLs_test = np.array(KLs_test)
   np.save(os.path.join(args.save_dir, 'KLs_test.npy'), KLs_test)
-  plt.plot(np.log(KLs_test))
+  plt.plot(KLs_test)
   plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log_test.png'))
   plt.close()
 

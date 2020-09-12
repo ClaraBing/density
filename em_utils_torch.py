@@ -469,7 +469,7 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
   return new_X, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right]
 
 
-def compute_log_det(Y, pi, mu, sigma_sqr, A,
+def compute_log_det(Y, X, pi, mu, sigma_sqr, A,
                     cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right):
   N, D = Y.shape
   # pdb.set_trace()
@@ -477,7 +477,9 @@ def compute_log_det(Y, pi, mu, sigma_sqr, A,
   log_pdfs = - 0.5 * scaled**2 + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr)
   log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
 
-  log_gaussian_derivative_good = dists.Normal(0, 1).log_prob(Y) * cdf_mask
+  t2 = (X**2).sum() / N + 0.5*np.log(2*np.pi)
+
+  log_gaussian_derivative_good = dists.Normal(0, 1).log_prob(X) * cdf_mask
   cdf_l_bad_right_log = log_sf_l * cdf_mask_right + (-1.) * (1. - cdf_mask_right)
   cdf_l_bad_left_log = log_cdf_l * cdf_mask_left + (-1.) * (1. - cdf_mask_left)
   log_gaussian_derivative_left = (torch.log(torch.sqrt(-2 * cdf_l_bad_left_log))
@@ -485,6 +487,9 @@ def compute_log_det(Y, pi, mu, sigma_sqr, A,
   log_gaussian_derivative_right = (torch.log(torch.sqrt(-2. * cdf_l_bad_right_log))
                                    - log_sf_l) * cdf_mask_right
   log_gaussian_derivative = log_gaussian_derivative_good + log_gaussian_derivative_left + log_gaussian_derivative_right
+
+  lgd_sum = log_gaussian_derivative.sum() / N
+  # pdb.set_trace()
 
   log_det = (log_pdf - log_gaussian_derivative).sum() / N + torch.log(torch.abs(torch.det(A)))
   return log_det
