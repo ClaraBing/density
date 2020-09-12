@@ -144,7 +144,8 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
           flag = True
           gnorm = torch.norm(grad)
           n_iter = 0
-          while flag:
+          ITER_LIM = 10
+          while flag and n_iter < ITER_LIM:
             n_iter += 1
             Ap = A + t * grad
             _, ss, _ = torch.svd(Ap)
