@@ -175,7 +175,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       nll_start = time()
     nll = eval_NLL(X)
     # kl = eval_KL(X, pi, mu, sigma_sqr)
-    log_det += compute_log_det(Y, pi, mu, sigma_sqr, A, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right)
+    log_det += compute_log_det(Y, X, pi, mu, sigma_sqr, A, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right)
     kl = eval_KL(X, log_det)
     if TIME:
       time_NLL += time() - nll_start,
@@ -204,7 +204,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     plot_hist(x, fimg)
     nll_test = eval_NLL(Xtest)
     # kl_test = eval_KL(Xtest, pi, mu, sigma_sqr)
-    log_det_test += compute_log_det(Ytest, pi, mu, sigma_sqr, A, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test)
+    log_det_test += compute_log_det(Ytest, Xtest, pi, mu, sigma_sqr, A, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test)
     kl_test = eval_KL(Xtest, log_det_test)
     NLLs_test += nll_test,
     KLs_test += kl_test,
