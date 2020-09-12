@@ -181,7 +181,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     KLs += kl,
     if PRINT_NLL:
       print('NLL:', nll)
-    print('KL:', kl.item())
+    print('KL:', kl)
 
     x = X
     fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
@@ -203,13 +203,12 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     nll_test = eval_NLL(Xtest)
     # kl_test = eval_KL(Xtest, pi, mu, sigma_sqr)
     log_det_test += compute_log_det(Ytest, pi, mu, sigma_sqr, A, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test)
-    pdb.set_trace()
     kl_test = eval_KL(Xtest, log_det_test)
     NLLs_test += nll_test,
     KLs_test += kl_test,
     if PRINT_NLL:
       print('NLL (test):', nll_test)
-    print('KL (test):', kl_test.item())
+    print('KL (test):', kl_test)
     print()
 
     if args.save_dir:
@@ -233,8 +232,12 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL.png'))
       plt.close()
       np.save(os.path.join(args.save_dir, 'KLs.npy'), np.array(KLs))
-      plt.plot(np.log(np.array(KLs)))
+      plt.plot(np.array(KLs))
       plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log.png'))
+      plt.close()
+      np.save(os.path.join(args.save_dir, 'KLs_test.npy'), np.array(KLs_test))
+      plt.plot(np.array(KLs_test))
+      plt.savefig(os.path.join(args.save_dir, 'figs', 'KLtest_log.png'))
       plt.close()
 
     if TIME:

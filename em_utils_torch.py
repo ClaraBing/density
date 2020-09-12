@@ -23,7 +23,7 @@ TIME = 1
 CHECK_OBJ = 1
 
 SMALL = 1e-10
-EPS = 5e-7
+EPS = 5e-8
 EPS_GRAD = 1e-2
 
 DTYPE = torch.DoubleTensor
@@ -365,7 +365,7 @@ def get_objetive(X, A, pi, mu, sigma_sqr, w, Y=None):
   return obj
 
 def get_grad(X, A, w, mu, sigma_sqr):
-  N, D = X.shape
+  N, D, K = w.shape
   if TIME:
     y_start = time()
   Y = A.matmul(X.T)
@@ -409,7 +409,7 @@ normal_distribution = dists.Normal(0, 1)
 
 # compute inverse normal CDF
 def gaussianize_1d(X, pi, mu, sigma_sqr):
-  mask_bound = 0.5e-7
+  mask_bound = 5e-8
 
   N, D = X.shape
 
@@ -445,11 +445,28 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
   inverse_cdf += (-torch.sqrt(-2 * cdf_bad_left_log))
   if torch.isnan(inverse_cdf.max()) or torch.isnan(inverse_cdf.min()):
     print('inverse CDF: NaN.')
+    exit(0)
     pdb.set_trace()
   if torch.isinf(inverse_cdf.max()) or torch.isinf(inverse_cdf.min()):
     print('inverse CDF: Inf.')
+    exit(0)
     pdb.set_trace()
-  return inverse_cdf, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right]
+
+  # old simple (and possibly numerically unstable) way
+  cdf2 = norm.cdf(scaled)
+  # remove outliers 
+  cdf2[cdf2<EPS] = EPS
+  cdf2[cdf2>1-EPS] = 1 - EPS
+  new_distr = (pi.cpu().numpy() * cdf2).sum(-1)
+  new_X = norm.ppf(new_distr)
+  new_X = to_tensor(new_X)
+
+  if False and torch.norm(new_X - inverse_cdf) > 10:
+    print('Gaussianization 1D mismatch.')
+    pdb.set_trace()
+
+  # return inverse_cdf, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right]
+  return new_X, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right]
 
 
 def compute_log_det(Y, pi, mu, sigma_sqr, A,
@@ -477,7 +494,7 @@ def eval_KL(X, log_det):
   # term for std normal
   log_probs = - (X**2).sum() - 0.5*D *np.log(2*np.pi)
   KL = - log_probs / N - log_det
-  return KL
+  return KL.item()
 
 def eval_KL_old(X, pi, mu, sigma_sqr):
   N, D = X.shape
