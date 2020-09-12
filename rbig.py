@@ -56,6 +56,8 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
       bandwidths = []
       vectors = []
       kl_layer = [[] for _ in range(n_layer)]
+      bpd_layer = [[] for _ in range(n_layer)]
+      log_prob_layer = [[] for _ in range(n_layer)]
       for batch_idx, data in enumerate(val_loader):
           if type(data) is list or type(data) is tuple:
             data = data[0]
@@ -156,6 +158,10 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
               kls += 0,
               val_loss_curr_layer, val_log_prob_curr_layer = flow_loss(data, log_det)
               kl_layer[prev_l] += val_loss_curr_layer.item(),
+              test_bpd_curr_layer = (val_loss_curr_layer.item() * data.shape[0] - log_det_logit) * (
+                      1 / (np.log(2) * np.prod(data.shape))) + 8
+              bpd_layer[prev_l] += test_bpd_curr_layer,
+              log_prob_layer[prev_l] += val_log_prob_curr_layer.item(),
 
           if not FAIL_FLAG:
             if TIME:
@@ -173,15 +179,26 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
             if not SILENT and log_batch and batch_idx % 100 == 0:
                 print("Batch {} loss {} (log prob: {}) bpd {}".format(batch_idx, val_loss_r, val_log_prob, test_bpd_r))
 
-            kl_means = []
+            kl_means, bpd_means, log_prob_means = [], [], []
             for li in range(n_layer):
-              curr = np.array(kl_layer[li])
-              print('Layer {}: mean={:.3e} / std={:.3e} / max={:.3e} / min={:.3e}'.format(
-                li, curr.mean(), curr.std(), curr.max(), curr.min()))
-              kl_means += curr.mean(),
+              curr_kl = np.array(kl_layer[li])
+              curr_bpd = np.array(bpd_layer[li])
+              curr_log_prob = np.array(log_prob_layer[li])
+              if VERBOSE:
+                print('Layer {}: mean={:.3e} / std={:.3e} / max={:.3e} / min={:.3e}'.format(
+                  li, curr.mean(), curr.std(), curr.max(), curr.min()))
+              kl_means += curr_KL.mean(),
+              bpd_means += curr_bpd.mean(),
+              log_prob_means += curr_log_prob.mean(),
             print()
             plt.plot(kl_means)
             plt.savefig('{}/images/RBIG_KLbyLayer_{}_{}_run{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+            plt.close()
+            plt.plot(bpd_means)
+            plt.savefig('{}/images/RBIG_BPDbyLayer_{}_{}_run{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+            plt.close()
+            plt.plot(log_prob_means)
+            plt.savefig('{}/images/RBIG_LogProbbyLayer_{}_{}_run{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
             plt.close()
 
             if False: # TODO: check this
@@ -201,6 +218,26 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
       print()
       plt.plot([each.mean() for each in kl_layer])
       plt.savefig('{}/images/RBIG_KLbyLayer_{}_{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+      plt.close()
+
+      print('BPD by layer.')
+      for li in range(n_layer):
+        bpd_layer[li] = np.array(bpd_layer[li])
+        print('Layer {}: mean={:.3e} / std={:.3e} / max={:.3e} / min={:.3e}'.format(
+           li, bpd_layer[li].mean(), bpd_layer[li].std(), bpd_layer[li].max(), bpd_layer[li].min()))
+      print()
+      plt.plot([each.mean() for each in bpd_layer])
+      plt.savefig('{}/images/RBIG_BPDbyLayer_{}_{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+      plt.close()
+
+      print('Log-prob by layer.')
+      for li in range(n_layer):
+        log_prob_layer[li] = np.array(log_prob_layer[li])
+        print('Layer {}: mean={:.3e} / std={:.3e} / max={:.3e} / min={:.3e}'.format(
+           li, log_prob_layer[li].mean(), log_prob_layer[li].std(), log_prob_layer[li].max(), log_prob_layer[li].min()))
+      print()
+      plt.plot([each.mean() for each in log_prob_layer])
+      plt.savefig('{}/images/RBIG_LogProbbyLayer_{}_{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
       plt.close()
 
       if FAIL_FLAG:
