@@ -29,6 +29,8 @@ parser.add_argument('--data', type=str, default='GM', choices=[
        'GM', 'GM_scale1', 'GM_scale2', 'GMn2', 'concentric',
        # UCI
        'gas16_co', 'gas16_methane', 'gas8_co', 'gas8_co_normed', 'miniboone',
+       # images,
+       'MNIST',
        ])
 parser.add_argument('--save-token', type=str, default='')
 parser.add_argument('--save-dir', type=str)
@@ -366,12 +368,20 @@ if __name__ == '__main__':
   elif data_token == 'miniboone':
     fdata = 'miniboone/train_normed.npy'
     fdata_val = 'miniboone/val_normed.npy'
+  elif data_token == 'MNIST':
+    mnist_dir = 'mnist/MNIST/processed'
+    fdata = os.path.join(mnist_dir, 'train.npy')
+    fdata_val = os.path.join(mnist_dir, 'test.npy')
   
   data_token += args.save_token
 
   X = np.load(os.path.join(data_dir, fdata))
   Xtest = np.load(os.path.join(data_dir, fdata_val))
+  if X.ndim > 2: # images
+    X = X.reshape(len(X), -1)
+    Xtest = Xtest.reshape(len(Xtest), -1)
   if args.n_pts:
     X = X[:args.n_pts]
+    Xtest = Xtest[:args.n_pts//2]
   fit(X, Xtest, mu_low, mu_up, data_token)
   
