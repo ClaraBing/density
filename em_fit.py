@@ -173,6 +173,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     if TIME:
       time_g1d += time() - g1d_start,
       nll_start = time()
+    check_cov(Xtest)
     nll = eval_NLL(X)
     # kl = eval_KL(X, pi, mu, sigma_sqr)
     log_det += compute_log_det(Y, X, pi, mu, sigma_sqr, A, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right)
@@ -195,6 +196,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
 
     # check on test data
     Xtest, cdf_mask_test, [log_cdf_test, cdf_mask_left_test], [log_sf_test, cdf_mask_right_test] = gaussianize_1d(Ytest, pi, mu, sigma_sqr)
+    check_cov(Xtest)
     x = Xtest
     fimg = 'figs/hist2d_test_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)

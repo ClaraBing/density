@@ -375,8 +375,8 @@ def get_grad(X, A, w, mu, sigma_sqr):
     y_time = 0
 
   scaled = (-Y.T.unsqueeze(-1) + mu) / sigma_sqr
-  weighted_X = (w * scaled).view(N, D, 1, K) * X.view(N, 1, D, 1)
-  B = weighted_X.sum(0).sum(-1) / N
+  weights = (w * scaled).sum(-1) / N
+  B = weights.T.matmul(X)
   grad = torch.inverse(A).T + B
   return grad, y_time
 
@@ -529,6 +529,15 @@ def eval_KL_old(X, pi, mu, sigma_sqr):
 
   # prob = torch.exp(-0.5 * exponents) * pi / (sigma_sqr**0.5)
   # log_prob_curr = torch.log(prob)
+
+def check_cov(X):
+  N, D = X.shape
+  cov = X.T.matmul(X) / N
+  _, ss, _ = torch.svd(cov)
+  ss = ss.cpu().numpy()
+  print('check cov: ss: max={} / min={} / mean={} / std={}'.format(
+    ss.max(), ss.min(), ss.mean(), ss.std()))
+  print('check cov: diff from I: {}'.format(torch.norm(torch.eye(D).to(device) - cov).item()))
 
 def get_aranges(low, up, n_steps):
   if low == up:
