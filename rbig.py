@@ -157,17 +157,18 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
               # kls += kl,
               kls += 0,
               val_loss_curr_layer, val_log_prob_curr_layer = flow_loss(data, log_det)
+              check_cov(data)
               kl_layer[prev_l] += val_loss_curr_layer.item(),
               test_bpd_curr_layer = (val_loss_curr_layer.item() * data.shape[0] - log_det_logit) * (
                       1 / (np.log(2) * np.prod(data.shape))) + 8
-              bpd_layer[prev_l] += test_bpd_curr_layer,
+              bpd_layer[prev_l] += test_bpd_curr_layer.item(),
               log_prob_layer[prev_l] += val_log_prob_curr_layer.item(),
 
           if not FAIL_FLAG:
             if TIME:
               start = time()
             val_loss_r, val_log_prob_r = flow_loss(data, log_det)
-            print('')
+            check_cov(data)
             if TIME:
               times['flow_loss'] += time() - start,
             test_bpd_r = (val_loss_r.item() * data.shape[0] - log_det_logit) * (
@@ -180,6 +181,8 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
                 print("Batch {} loss {} (log prob: {}) bpd {}".format(batch_idx, val_loss_r, val_log_prob, test_bpd_r))
 
             kl_means, bpd_means, log_prob_means = [], [], []
+            # print('Check data type')
+            # pdb.set_trace()
             for li in range(n_layer):
               curr_kl = np.array(kl_layer[li])
               curr_bpd = np.array(bpd_layer[li])
@@ -187,10 +190,9 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
               if VERBOSE:
                 print('Layer {}: mean={:.3e} / std={:.3e} / max={:.3e} / min={:.3e}'.format(
                   li, curr.mean(), curr.std(), curr.max(), curr.min()))
-              kl_means += curr_KL.mean(),
+              kl_means += curr_kl.mean(),
               bpd_means += curr_bpd.mean(),
               log_prob_means += curr_log_prob.mean(),
-            print()
             plt.plot(kl_means)
             plt.savefig('{}/images/RBIG_KLbyLayer_{}_{}_run{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
             plt.close()
@@ -253,11 +255,20 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
                  image_name='{}/images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, args.n_layer, n_run),
                  channel=channel, image_size=image_size, process_size=10)
       else:
+        if data_anchors[0].shape[1] > 2:
+          v1 = np.random.randn(data_anchors[0].shape[1])
+          v2 = np.random.randn(data_anchors[0].shape[1])
+          v2 -= v1.dot(v2) * v1
+          v1 /= np.linalg.norm(v1)
+          v2 /= np.linalg.norm(v2)
+          proj_mtrx = np.stack([v1, v2]).T
         # args.dataset in ['GaussianLine', 'GaussianMixture', 'uniform']:
         for li, pts in enumerate(data_anchors):
           pts = pts.cpu().numpy()
           plt.figure(figsize=[8,8])
-          plt.hist2d(pts[:,0], pts[:,1], bins=[100,100])
+
+          img2d = pts.dot(proj_mtrx) if pts.shape[1] > 2 else pts
+          plt.hist2d(img2d[:,0], img2d[:,1], bins=[100,100])
           plt.xlim([-2.5, 2.5])
           plt.ylim([-2.5, 2.5])
           plt.savefig('{}/images/RBIG_transformed_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, li, n_run))

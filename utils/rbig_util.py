@@ -280,3 +280,13 @@ def dequantization(data, lambd):
   data = logit_transform(data, lambd)
   return data
 
+def check_cov(X):
+  N, D = X.shape
+  cov = X.T.matmul(X) / N
+  _, ss, _ = torch.svd(cov)
+  ss = ss.cpu().numpy()
+  print('check cov: ss: max={} / min={} / mean={} / std={}'.format(
+    ss.max(), ss.min(), ss.mean(), ss.std()))
+  print('check cov: diff from I: {}'.format(torch.norm(torch.eye(D).to(device) - cov).item()))
+
+
