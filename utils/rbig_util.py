@@ -12,6 +12,7 @@ from .vis_samples import plot_samples
 import pdb
 
 SILENT = True
+SINGULAR_SMALL = 1e-5
 
 # set random seed
 torch.manual_seed(1234)
@@ -148,7 +149,7 @@ def close(a, b, rtol=1e-5, atol=1e-4):
 
 
 # compute inverse normal CDF
-def logistic_inverse_normal_cdf(x, bandwidth, datapoints):
+def logistic_inverse_normal_cdf(x, bandwidth, datapoints, inverse_cdf_by_thresh=False):
     if x.dtype != bandwidth.dtype:
       bandwidth = bandwidth.type(x.dtype)
     if x.dtype != datapoints.dtype:
@@ -178,7 +179,20 @@ def logistic_inverse_normal_cdf(x, bandwidth, datapoints):
     # Keep small bad CDF, mask the good and large bad CDF values to 1.
     cdf_l_bad_left_log = log_cdf_l * cdf_mask_left
     inverse_l += (-torch.sqrt(-2 * cdf_l_bad_left_log))
-    return inverse_l, cdf_mask, [log_cdf_l, cdf_mask_left], [log_sf_l, cdf_mask_right]
+
+    if inverse_cdf_by_thresh:
+      # remove outliers 
+      cdf_l[cdf_l<mask_bound] = mask_bound
+      cdf_l[cdf_l>1-mask_bound] = 1 - mask_bound
+      pdb.set_trace()
+      new_distr = cdf_l.sum(-1)
+      new_X = norm.ppf(new_distr)
+      new_X = to_tensor(new_X)
+      ret_x = new_X
+    else:
+      ret_x = inverse_l 
+
+    return ret_x, cdf_mask, [log_cdf_l, cdf_mask_left], [log_sf_l, cdf_mask_right]
 
 
 # Inverting the function using bisection, but with respect to the composed function
@@ -256,10 +270,18 @@ def generate_orthogonal_matrix(data_anchor, rot_type="PCA", verbose=False):
         # multiple
         try:
           Y = ica.fit_transform(data_anchor.cpu())
-          rotation_matrix = np.linalg.inv(ica.mixing_)
+          rot_orig = ica.mixing_
+          _, ss, _ = np.linalg.svd(rot_orig)
+          rot_orig /= ss[0]
+          if ss[-1] / ss[0] < SINGULAR_SMALL:
+            rot_orig += np.eye(rot_orig.shape[0]) * SINGULAR_SMALL
+          # print('ICA: rot_orig')
+          # pdb.set_trace()
+          rotation_matrix = np.linalg.inv(rot_orig)
           _, ss, _ = np.linalg.svd(rotation_matrix)
           rotation_matrix /= ss[0]
           rotation_matrix = torch.tensor(rotation_matrix).double().to(device)
+          rotation_matrix = rotation_matrix.T
           cnt = 2*n_tries
         except:
           cnt += 1
@@ -283,8 +305,11 @@ def dequantization(data, lambd):
 def check_cov(X):
   N, D = X.shape
   cov = X.T.matmul(X) / N
+  diag = torch.diag(cov).cpu().numpy()
   _, ss, _ = torch.svd(cov)
   ss = ss.cpu().numpy()
+  print('check cov: diag: max={} / min={} / mean={} / std={}'.format(
+    diag.max(), diag.min(), diag.mean(), diag.std()))
   print('check cov: ss: max={} / min={} / mean={} / std={}'.format(
     ss.max(), ss.min(), ss.mean(), ss.std()))
   print('check cov: diff from I: {}'.format(torch.norm(torch.eye(D).to(device) - cov).item()))
