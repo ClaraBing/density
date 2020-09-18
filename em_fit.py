@@ -22,7 +22,10 @@ parser.add_argument('--n-steps', type=int, default=50)
 parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
 parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'torchGA', 'torchAll', 'CF', 'ICA'])
-parser.add_argument('--grad-mode', type=str, default='GA', choices=['GA', 'CF', 'BTLS', 'perturb'])
+parser.add_argument('--A-first', type=int, default=1, choices=[0,1],
+                    help="For ICA: whether to update A first (i.e. before estimating other params).")
+parser.add_argument('--grad-mode', type=str, default='GA', choices=['GA', 'CF', 'BTLS', 'perturb'],
+                    help="Ways to update A in EM iterates.")
 parser.add_argument('--data', type=str, default='GM', choices=[
        # connected
        'normal', 'scaledNormal', 'rotatedNormal', 'ring',
@@ -114,7 +117,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     iter_start = time()
     print('iteration {} - data={} - mode={}'.format(i, args.data, args.mode))
     if A_mode == 'ICA':
-      A, pi, mu, sigma_sqr = update_ICA(X, K, gammas[i], A, pi, mu, sigma_sqr)
+      A, pi, mu, sigma_sqr = update_ICA(X, K, gammas[i], A, pi, mu, sigma_sqr, A_first=args.A_first)
       objs = []
     elif A_mode == 'CF':
       # A, pi, mu, sigma_sqr, obj, avg_time = update_CF(X, K, gammas[i], A, pi, mu, sigma_sqr)
@@ -323,7 +326,12 @@ if __name__ == '__main__':
   if args.save_token:
     args.save_dir += '_' + args.save_token
   args.save_dir = os.path.join(SAVE_ROOT, args.save_dir)
-  os.makedirs(os.path.join(args.save_dir), exist_ok=True)
+  if os.path.exists(args.save_dir):
+    proceed = input('Dir exist: {} \n Do you want to proceed? (y/N)'.format(args.save_dir))
+    if 'y' not in proceed:
+      print('Exiting. Bye!')
+      exit(0)
+  os.makedirs(args.save_dir, exist_ok=True)
   os.makedirs(os.path.join(args.save_dir, 'figs'), exist_ok=True)
   if CHECK_OBJ:
     os.makedirs(os.path.join(args.save_dir, 'figs', 'objs'), exist_ok=True)  

@@ -25,7 +25,7 @@ CHECK_OBJ = 1
 SMALL = 1e-10
 EPS = 5e-8
 EPS_GRAD = 1e-2
-SINGULAR_SMALL = 1e-5
+SINGULAR_SMALL = 1e-2
 
 DTYPE = torch.DoubleTensor
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -53,9 +53,10 @@ def init_params(D, K, mu_low, mu_up):
   return A, pi, mu, sigma_sqr
 
 
-def update_ICA(X, K, gamma, A, pi, mu, sigma_sqr):
-  Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr)
-  pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
+def update_ICA(X, K, gamma, A, pi, mu, sigma_sqr, A_first=False):
+  if not A_first:
+    Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr)
+    pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
 
   cov = X.T.matmul(X) / len(X)
   cnt = 0
@@ -67,17 +68,24 @@ def update_ICA(X, K, gamma, A, pi, mu, sigma_sqr):
       Aorig = ica.mixing_
       _, ss, _ = np.linalg.svd(Aorig)
       Aorig /= ss[0]
+      Y *= ss[0]
       if ss[-1] / ss[0] < SINGULAR_SMALL:
         Aorig += SINGULAR_SMALL * np.eye(Aorig.shape[0])
       A = np.linalg.inv(Aorig)
       _, ss, _ = np.linalg.svd(A)
       A = to_tensor(A / ss[0])
+      Y /= ss[0]
       cnt = 2*n_tries
     except:
       cnt += 1
   if cnt != 2*n_tries:
     print('ICA failed. Use random.')
     A = to_tensor(ortho_group.rvs(D))
+
+  if A_first:
+    Y = to_tensor(Y).T
+    Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr, Y=Y)
+    pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
   return A, pi, mu, sigma_sqr
 
 
@@ -613,11 +621,16 @@ def eval_KL_old(X, pi, mu, sigma_sqr):
 def check_cov(X):
   N, D = X.shape
   cov = X.T.matmul(X) / N
+  diag = torch.diag(cov)
+  diag = diag.cpu().numpy()
+  print('check cov:')
+  print('  diag: max={:.4e} / min={:.4e} / mean={:.4e} / std={:.4e}'.format(
+    diag.max(), diag.min(), diag.mean(), diag.std()))
   _, ss, _ = torch.svd(cov)
   ss = ss.cpu().numpy()
-  print('check cov: ss: max={:.4e} / min={:.4e} / mean={:.4e} / std={:.4e}'.format(
+  print('  ss: max={:.4e} / min={:.4e} / mean={:.4e} / std={:.4e}'.format(
     ss.max(), ss.min(), ss.mean(), ss.std()))
-  print('check cov: diff from I: {:.4e}'.format(torch.norm(torch.eye(D).to(device) - cov).item()))
+  print('  diff from I: {:.4e}'.format(torch.norm(torch.eye(D).to(device) - cov).item()))
 
 def get_cofactors(A):
   cofs = torch.zeros_like(A)
