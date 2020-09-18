@@ -22,6 +22,7 @@ parser.add_argument('--n-steps', type=int, default=50)
 parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
 parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'torchGA', 'torchAll', 'CF', 'ICA'])
+parser.add_argument('--grad-mode', type=str, default='GA', choices=['GA', 'CF', 'BTLS', 'perturb'])
 parser.add_argument('--data', type=str, default='GM', choices=[
        # connected
        'normal', 'scaledNormal', 'rotatedNormal', 'ring',
@@ -107,31 +108,37 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     time_NLL = []
     time_A, time_E, time_GA, time_Y = [], [], [], []
     time_obj, n_iters_btls = [], []
+    time_CF = []
+    time_all = [time_iter, time_em, time_g1d, time_save, time_NLL, time_A, time_E, time_GA, time_Y, time_obj, n_iters_btls, time_CF]
   for i in range(n_steps):
     iter_start = time()
     print('iteration {} - data={} - mode={}'.format(i, args.data, args.mode))
     if A_mode == 'ICA':
       A, pi, mu, sigma_sqr = update_ICA(X, K, gammas[i], A, pi, mu, sigma_sqr)
       objs = []
+    elif A_mode == 'CF':
+      # A, pi, mu, sigma_sqr, obj, avg_time = update_CF(X, K, gammas[i], A, pi, mu, sigma_sqr)
+      A, pi, mu, sigma_sqr, obj, avg_time = update_EM(X, K, gammas[i], A, pi, mu, sigma_sqr,
+                A_mode=A_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
+      if TIME:
+        time_CF += avg_time['CF'],
+    elif A_mode == 'random':
+      A = ortho_group.rvs(D)
     else:
-      if A_mode == 'random':
-        A = ortho_group.rvs(D)
-      else:
-        # A_mode = 'GA' or 'torchGA'
-        if TIME:
-          em_start = time()
-        A, pi, mu, sigma_sqr, grad_norms, objs, avg_time = update_EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
-                  A_mode=A_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
-        if TIME:
-          time_em += time() - em_start,
-          time_A += avg_time['A'],
-          time_E += avg_time['E'],
-          time_GA += avg_time['GA'],
-          time_Y += avg_time['Y'],
-          time_obj += avg_time['obj'],
-          n_iters_btls += avg_time['btls_nIters'],
-        if args.mode == 'GA':
-          grad_norms_total += np.array(grad_norms).mean(),
+      # A_mode = 'GA' or 'torchGA'
+      if TIME:
+        em_start = time()
+      A, pi, mu, sigma_sqr, grad_norms, objs, avg_time = update_EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
+                A_mode=A_mode, grad_mode=args.grad_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
+      if TIME:
+        time_em += time() - em_start,
+        time_A += avg_time['A'],
+        time_E += avg_time['E'],
+        time_GA += avg_time['GA'],
+        time_Y += avg_time['Y'],
+        time_obj += avg_time['obj'],
+        n_iters_btls += avg_time['btls_nIters'],
+      grad_norms_total += np.array(grad_norms).mean(),
 
     if type(X) is torch.Tensor:
       Y = X.matmul(A.T)
@@ -173,7 +180,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     if TIME:
       time_g1d += time() - g1d_start,
       nll_start = time()
-    check_cov(Xtest)
+    check_cov(X)
     nll = eval_NLL(X)
     # kl = eval_KL(X, pi, mu, sigma_sqr)
     log_det += compute_log_det(Y, X, pi, mu, sigma_sqr, A, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right)
@@ -304,12 +311,11 @@ if __name__ == '__main__':
   data_dir = './datasets/'
   ga_token = ''
   if args.mode in ['GA', 'torchGA']:
-    if args.gamma == 0:
-      ga_token = '_perturbed'
-    elif args.gamma < 0:
-      ga_token = '_BTLS'
-    else:
+    ga_token = '_'+args.grad_mode
+    if args.grad_mode == 'GA':
       ga_token = '_gamma{}_gammaMin{}'.format(args.gamma, args.gamma_min)
+  elif args.mode == 'CF':
+    ga_token = '_gamma{}'.format(args.gamma)
   args.save_dir = '{}/mode{}_K{}_iter{}_em{}_gd{}{}'.format(
         args.data, args.mode, args.K, args.n_steps, args.n_em, args.n_gd, ga_token)
   if args.n_pts:
@@ -372,8 +378,8 @@ if __name__ == '__main__':
     fdata_val = 'miniboone/val_normed.npy'
   elif data_token == 'MNIST':
     mnist_dir = 'mnist/MNIST/processed'
-    fdata = os.path.join(mnist_dir, 'train.npy')
-    fdata_val = os.path.join(mnist_dir, 'test.npy')
+    fdata = os.path.join(mnist_dir, 'train_normed.npy')
+    fdata_val = os.path.join(mnist_dir, 'test_normed.npy')
   
   data_token += args.save_token
 

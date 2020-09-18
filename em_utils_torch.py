@@ -25,6 +25,7 @@ CHECK_OBJ = 1
 SMALL = 1e-10
 EPS = 5e-8
 EPS_GRAD = 1e-2
+SINGULAR_SMALL = 1e-5
 
 DTYPE = torch.DoubleTensor
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -63,7 +64,12 @@ def update_ICA(X, K, gamma, A, pi, mu, sigma_sqr):
     try:
       ica = FastICA()
       Y = ica.fit_transform(X.cpu())
-      A = np.linalg.inv(ica.mixing_)
+      Aorig = ica.mixing_
+      _, ss, _ = np.linalg.svd(Aorig)
+      Aorig /= ss[0]
+      if ss[-1] / ss[0] < SINGULAR_SMALL:
+        Aorig += SINGULAR_SMALL * np.eye(Aorig.shape[0])
+      A = np.linalg.inv(Aorig)
       _, ss, _ = np.linalg.svd(A)
       A = to_tensor(A / ss[0])
       cnt = 2*n_tries
@@ -75,10 +81,59 @@ def update_ICA(X, K, gamma, A, pi, mu, sigma_sqr):
   return A, pi, mu, sigma_sqr
 
 
+def update_CF(X, K, gamma, A, pi, mu, sigma_sqr):
+  N, D = X.shape
+  Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr)
+  pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
 
-def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
+  if TIME: t_start = time()
+
+  det = torch.det(A)
+  if det < 0:
+    print("Closed form: det(A) < 0")
+    pdb.set_trace()
+  
+  cofs = get_cofactors(A)
+
+  obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+  newA = A.clone()
+  for i in range(D):
+    for j in range(D):
+      t1 = (w[:, i] * X[:,j,None]**2 / sigma_sqr[i]).sum() / N
+      diff = (Y[i] - A[i,j] * X[:, j])[:, None] - mu[i]
+      t2 = (w[:, i] * X[:,j,None] * diff / sigma_sqr[i]).sum() / N
+      c1 = t1 * cofs[i,j]
+      c2 = t1 * (det - A[i,j]*cofs[i,j]) + t2 * cofs[i,j]
+      c3 = t2 * (det - A[i,j]*cofs[i,j]) - cofs[i,j]
+      inner = c2**2 - 4*c1*c3
+      if inner < 0:
+        print('Problme at solving for A[{},{}]: no real sol.'.format(i,j))
+        pdb.set_trace()
+      if c1 == 0:
+        grad = -(c2 * A[i,j] + c3)
+        if grad < 0:
+          sol = -gamma
+        else:
+          sol = gamma
+      else:
+        sol = (inner**0.5 - c2) / (2*c1)
+      curr_A = newA.clone()
+      curr_A[i,j] = sol
+      curr_obj = get_objetive(X, curr_A, pi, mu, sigma_sqr, w)
+      newA[i,j] = sol
+  A = newA.double()
+  obj = get_objetive(X, A, pi, mu, sigma_sqr, w).item()
+         
+  if VERBOSE:
+    print('A:', A.view(-1))
+
+  if TIME: avg_time = {'CF': time()-t_start}
+  return A, pi, mu, sigma_sqr, obj, avg_time 
+
+
+def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
+       A_mode='GA', grad_mode='GA',
        max_em_steps=30, n_gd_steps=20):
-  BACKTRACK = gamma < 0
 
   if type(X) is not torch.Tensor:
     X = torch.tensor(X)
@@ -102,15 +157,52 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
     A_prev, sigma_sqr_prev = A.clone(), sigma_sqr.clone()
     objs += [],
 
-
-    if TIME:
-      e_start = time()
-
+    if TIME: e_start = time()
     Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr, Y=Y)
-    if TIME:
-      time_E += time() - e_start,
+    if TIME: time_E += time() - e_start,
 
     # M-step
+    if A_mode == 'CF': # closed form
+      pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
+
+      for _ in range(n_gd_steps):
+        det = torch.det(A)
+        if det < 0:
+          print("Closed form: det(A) < 0")
+          pdb.set_trace()
+        
+        cofs = get_cofactors(A)
+
+        obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+        newA = A.clone()
+        for i in range(D):
+          for j in range(D):
+            t1 = (w[:, i] * X[:,j,None]**2 / sigma_sqr[i]).sum() / N
+            diff = (Y[i] - A[i,j] * X[:, j])[:, None] - mu[i]
+            t2 = (w[:, i] * X[:,j,None] * diff / sigma_sqr[i]).sum() / N
+            c1 = t1 * cofs[i,j]
+            c2 = t1 * (det - A[i,j]*cofs[i,j]) + t2 * cofs[i,j]
+            c3 = t2 * (det - A[i,j]*cofs[i,j]) - cofs[i,j]
+            inner = c2**2 - 4*c1*c3
+            if inner < 0:
+              print('Problme at solving for A[{},{}]: no real sol.'.format(i,j))
+              pdb.set_trace()
+            if c1 == 0:
+              grad = -(c2 * A[i,j] + c3)
+              if grad < 0:
+                sol = -gamma
+              else:
+                sol = gamma
+            else:
+              sol = (inner**0.5 - c2) / (2*c1)
+            curr_A = newA.clone()
+            curr_A[i,j] = sol
+            curr_obj = get_objetive(X, curr_A, pi, mu, sigma_sqr, w)
+            newA[i,j] = sol
+        A = newA.double()
+        obj = get_objetive(X, A, pi, mu, sigma_sqr, w).item()
+        objs[-1] += obj,
+
     if A_mode == 'GA': # gradient ascent
       if CHECK_OBJ:
         objs[-1] += get_objetive(X, A, pi, mu, sigma_sqr, w),
@@ -119,70 +211,60 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         ga_start = time()
         if VERBOSE: print(A.view(-1))
         
-        if False: # TODO: should I update w per GD step?
-          Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr)
-
         pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
 
+        if TIME: a_start = time()
+        if grad_mode == 'CF':
+          A = set_grad_zero(X, A, w, mu, sigma_sqr)
+        else:
+          # gradient steps
+          grad, y_time = get_grad(X, A, w, mu, sigma_sqr)
+          if TIME:
+            time_Y += y_time,
+          if grad_mode == 'BTLS':
+            # backtracking line search
+            if TIME: obj_start = time()
+            obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+            if TIME: time_obj += time() - obj_start,
 
-        if TIME:
-          a_start = time()
-        # grad = torch.inverse(A).T + B
-        grad, y_time = get_grad(X, A, w, mu, sigma_sqr)
-        if TIME:
-          time_Y += y_time,
+            beta, t, flag = 0.6, 1, True
+            gnorm = torch.norm(grad)
+            n_iter, ITER_LIM = 0, 10
+            while flag and n_iter < ITER_LIM:
+              n_iter += 1
+              Ap = A + t * grad
+              _, ss, _ = torch.svd(Ap)
+              Ap /= ss[0]
+              if TIME: obj_start = time()
+              obj_p = get_objetive(X, Ap, pi, mu, sigma_sqr, w)
+              if TIME: time_obj += time() - obj_start,
+              t *= beta
+              base = obj - 0.5 * t * gnorm
+              flag = obj_p < base
+            gamma = t
+            n_iters_btls += n_iter,
+          elif grad_mode == 'perturb':
+            # perturb
+            perturb = A.std() * 0.1 * torch.randn(A.shape).type(DTYPE).to(device)
+            perturbed = A + perturb
+            perturbed_grad, _ = get_grad(X, perturbed, w, mu, sigma_sqr)
 
-        if TIME:
-          obj_start = time()
-        obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-        if TIME:
-          time_obj += time() - obj_start,
-        if BACKTRACK:
-          # backtracking line search
-          beta = 0.6
-          t = 1
-          flag = True
-          gnorm = torch.norm(grad)
-          n_iter = 0
-          ITER_LIM = 10
-          while flag and n_iter < ITER_LIM:
-            n_iter += 1
-            Ap = A + t * grad
-            _, ss, _ = torch.svd(Ap)
-            Ap /= ss[0]
-            if TIME:
-              obj_start = time()
-            obj_p = get_objetive(X, Ap, pi, mu, sigma_sqr, w)
-            if TIME:
-             time_obj += time() - obj_start,
-            t *= beta
-            base = obj - 0.5 * t * gnorm
-            flag = obj_p < base
-          gamma = t
-          n_iters_btls += n_iter,
-        elif gamma == 0:
-          # perturb
-          perturb = A.std() * 0.1 * torch.randn(A.shape).type(DTYPE).to(device)
-          perturbed = A + perturb
-          perturbed_grad, _ = get_grad(X, perturbed, w, mu, sigma_sqr)
+            grad_diff = torch.norm(grad - perturbed_grad)
+            gamma = 1 /(EPS_GRAD + grad_diff) * 0.03
 
-          grad_diff = torch.norm(grad - perturbed_grad)
-          gamma = 1 /(EPS_GRAD + grad_diff) * 0.03
+          grad_norms += torch.norm(grad).item(),
+          A += gamma * grad
 
-        A += gamma * grad
         _, ss, _ = torch.svd(A)
         A /= ss[0]
         if TIME:
           time_A += time() - a_start,
           time_GA += time() - ga_start,
-        grad_norms += torch.norm(grad).item(),
 
         if CHECK_OBJ:
-          if TIME:
-            obj_start = time()
+          if TIME: obj_start = time()
           obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-          if TIME:
-            time_obj += time() - obj_start,
+          if TIME: time_obj += time() - obj_start,
           objs[-1] += obj,
           if VERBOSE:
             print('iter {}: obj= {:.5f}'.format(i, obj))
@@ -199,7 +281,6 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         ga_start = time()
         if VERBOSE: print(A.view(-1))
         
-        # TODO: should I update them as well?
         pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
 
         if TIME:
@@ -210,10 +291,8 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
         objs[-1] += obj.item(),
         obj *= -1
-        if TIME:
-          time_obj += time() - obj_start,
-        if VERBOSE:
-          print('iter {}: obj= {:.5f}'.format(i, obj.item()))
+        if TIME: time_obj += time() - obj_start,
+        if VERBOSE: print('iter {}: obj= {:.5f}'.format(i, obj.item()))
 
         obj.backward()
         A.grad[torch.where(torch.isnan(A.grad))] = 0
@@ -227,7 +306,6 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
 
         sgd_grad = A.grad
         grad, y_time = get_grad(X, A, w, mu, sigma_sqr)
-        # print('A:', A.view(-1))
         
       A = A.detach()
       pi = pi.detach()
@@ -264,10 +342,8 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
         obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
         objs[-1] += obj.item(),
         obj *= -1
-        if TIME:
-          time_obj += time() - obj_start,
-        if VERBOSE:
-          print('iter {}: obj= {:.5f}'.format(i, obj.item()))
+        if TIME: time_obj += time() - obj_start,
+        if VERBOSE: print('iter {}: obj= {:.5f}'.format(i, obj.item()))
 
         obj.backward()
         optimizer.step()
@@ -278,7 +354,6 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
           time_GA += time() - ga_start,
         grad_norms += torch.norm(A.grad).item(),
         # print('A:', A.view(-1))
-
         
       A = A.detach()
       pi = pi.detach()
@@ -291,9 +366,6 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
       A = A/ss[0]
       pi[pi < 0] = SMALL
       pi /= pi.sum(1, keepdim=True)
-
-    elif A_mode == 'CF': # closed form
-      raise NotImplementedError("mode CF: not implemented yet.")
            
     # difference from the previous iterate
     dA, dsigma_sqr = torch.norm(A - A_prev), torch.norm(sigma_sqr.view(-1) - sigma_sqr_prev.view(-1))
@@ -312,6 +384,8 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5, A_mode='GA',
       'btls_nIters': np.array(n_iters_btls).mean() if n_iters_btls else 0,
     }
 
+  if A_mode == 'CF':
+    return A, pi, mu, sigma_sqr, objs, avg_time 
   return A, pi, mu, sigma_sqr, grad_norms, objs, avg_time 
 
 # util funcs in EM steps
@@ -330,8 +404,8 @@ def E(X, A, pi, mu, sigma_sqr, Y=None):
   w = w / Ksum
 
   w_sumN = w.sum(0)
-  w_sumNK = w_sumN.sum(-1)
   w_sumN[w_sumN < SMALL] = SMALL
+  w_sumNK = w_sumN.sum(-1)
   w_sumNK[w_sumNK < SMALL] = SMALL
   return Y, w, w_sumN, w_sumNK
 
@@ -364,10 +438,19 @@ def get_objetive(X, A, pi, mu, sigma_sqr, w, Y=None):
     pdb.set_trace()
   return obj
 
+def set_grad_zero(X, A, w, mu, sigma_sqr):
+  N, D, K = w.shape
+  Y = A.matmul(X.T)
+
+  scaled = (-Y.T.unsqueeze(-1) + mu) / sigma_sqr
+  weights = (w * scaled).sum(-1) / N
+  B = weights.T.matmul(X)
+  A_opt = torch.inverse(-B.T)
+  return A_opt
+
 def get_grad(X, A, w, mu, sigma_sqr):
   N, D, K = w.shape
-  if TIME:
-    y_start = time()
+  if TIME: y_start = time()
   Y = A.matmul(X.T)
   if TIME:
     y_time = time() - y_start
@@ -445,7 +528,6 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
   inverse_cdf += (-torch.sqrt(-2 * cdf_bad_left_log))
   if torch.isnan(inverse_cdf.max()) or torch.isnan(inverse_cdf.min()):
     print('inverse CDF: NaN.')
-    exit(0)
     pdb.set_trace()
   if torch.isinf(inverse_cdf.max()) or torch.isinf(inverse_cdf.min()):
     print('inverse CDF: Inf.')
@@ -472,7 +554,6 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
 def compute_log_det(Y, X, pi, mu, sigma_sqr, A,
                     cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right):
   N, D = Y.shape
-  # pdb.set_trace()
   scaled = (Y.unsqueeze(-1) - mu) / sigma_sqr**0.5
   log_pdfs = - 0.5 * scaled**2 + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr)
   log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
@@ -489,7 +570,6 @@ def compute_log_det(Y, X, pi, mu, sigma_sqr, A,
   log_gaussian_derivative = log_gaussian_derivative_good + log_gaussian_derivative_left + log_gaussian_derivative_right
 
   lgd_sum = log_gaussian_derivative.sum() / N
-  # pdb.set_trace()
 
   log_det = (log_pdf - log_gaussian_derivative).sum() / N + torch.log(torch.abs(torch.det(A)))
   return log_det
@@ -535,9 +615,32 @@ def check_cov(X):
   cov = X.T.matmul(X) / N
   _, ss, _ = torch.svd(cov)
   ss = ss.cpu().numpy()
-  print('check cov: ss: max={} / min={} / mean={} / std={}'.format(
+  print('check cov: ss: max={:.4e} / min={:.4e} / mean={:.4e} / std={:.4e}'.format(
     ss.max(), ss.min(), ss.mean(), ss.std()))
-  print('check cov: diff from I: {}'.format(torch.norm(torch.eye(D).to(device) - cov).item()))
+  print('check cov: diff from I: {:.4e}'.format(torch.norm(torch.eye(D).to(device) - cov).item()))
+
+def get_cofactors(A):
+  cofs = torch.zeros_like(A)
+  D = A.shape[0]
+  if D == 2:
+    cofs[0,0] = A[1,1]
+    cofs[0,1] = -A[1,0]
+    cofs[1,0] = -A[0,1]
+    cofs[1,1] = A[0,0]
+    return cofs
+
+  for i in range(D):
+    for j in range(D):
+      B = A.clone()
+      B[i] = 0
+      B[:, j] = 0
+      B = B[B.sum(0) != 0]
+      B = B.T
+      B = B[B.sum(1) != 0]
+      B = B.T
+      cof = (-1)**(i+j) * torch.det(B)
+      cofs[i,j] = cof.item()
+  return cofs
 
 def get_aranges(low, up, n_steps):
   if low == up:
@@ -558,7 +661,6 @@ def plot_hist(data, fimg):
 
 def to_tensor(data):
   return torch.tensor(data).type(DTYPE).to(device)
-
 
 def gen_data(scale):
   dlen = 100000
