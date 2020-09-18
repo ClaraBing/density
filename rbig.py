@@ -58,6 +58,8 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
       kl_layer = [[] for _ in range(n_layer)]
       bpd_layer = [[] for _ in range(n_layer)]
       log_prob_layer = [[] for _ in range(n_layer)]
+      log_det_train = torch.zeros(process_size).double().to(device)
+      kl_layer_train = []
       for batch_idx, data in enumerate(val_loader):
           if type(data) is list or type(data) is tuple:
             data = data[0]
@@ -85,7 +87,6 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
                 data.shape) * np.log(1 - 2 * lambd)
 
           # Pass the data through the first l-1 gaussian layer
-          kls = []
           for prev_l in range(n_layer):
               # initialize rotation matrix
               if batch_idx == 0:
@@ -114,7 +115,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
               if TIME:
                 start = time()
               inverse_l, cdf_mask, [log_cdf_l, cdf_mask_left], [log_sf_l, cdf_mask_right] \
-                  = logistic_inverse_normal_cdf(data, bandwidth=bandwidth, datapoints=data_anchors[prev_l])
+                  = logistic_inverse_normal_cdf(data, bandwidth=bandwidth, datapoints=data_anchors[prev_l], inverse_cdf_by_thresh=args.inverse_cdf_by_thresh)
               if TIME:
                 times['inverse_cdf'] += time() - start,
                 start = time()
@@ -140,8 +141,14 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
                       # inverse CDF
                       if TIME:
                         start = time()
-                      inverse_data, _, _, _ = logistic_inverse_normal_cdf(cur_data_batch, bandwidth=bandwidth,
-                                                                       datapoints=data_anchors[prev_l])
+                      inverse_data, cdf_mask_train, [log_cdf_l_train, cdf_mask_left_train], [log_sf_l_train, cdf_mask_right_train] = logistic_inverse_normal_cdf(cur_data_batch, bandwidth=bandwidth,
+                                                                       datapoints=data_anchors[prev_l], inverse_cdf_by_thresh=args.inverse_cdf_by_thresh)
+                      if b == 0:
+                        log_det_train += compute_log_det(cur_data_batch, inverse_data, data_anchors[prev_l], cdf_mask_train,
+                                                         log_cdf_l_train, cdf_mask_left_train, log_sf_l_train, cdf_mask_right_train, h=bandwidth)
+                        train_loss_curr_layer, train_log_prob_curr_layer = flow_loss(cur_data_batch, log_det)
+                        kl_layer_train += train_loss_curr_layer.item(),
+
                       if TIME:
                         times['inverse_cdf'] += time() - start,
                       # rotation
@@ -152,10 +159,6 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
                     times['cur_data_proc'] += time() - proc_start,
                   cur_data = torch.cat(update_data_arrays, dim=0)
                   data_anchors.append(cur_data[:cur_data.shape[0]])
-              # kl = compute_KL(data, data_anchors[prev_l], bandwidth)
-              # print('layer {}: KL = {}'.format(prev_l, kl))
-              # kls += kl,
-              kls += 0,
               val_loss_curr_layer, val_log_prob_curr_layer = flow_loss(data, log_det)
               check_cov(data)
               kl_layer[prev_l] += val_loss_curr_layer.item(),
@@ -180,9 +183,14 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
             if not SILENT and log_batch and batch_idx % 100 == 0:
                 print("Batch {} loss {} (log prob: {}) bpd {}".format(batch_idx, val_loss_r, val_log_prob, test_bpd_r))
 
+            if batch_idx == 0:
+              if VERBOSE:
+                print('Train KL: {}\n'.format(' / '.join(['layer{}: {:.4e}'.format(i+1, kl_train) for (i, kl_train) in enumerate(kl_layer_train)])))
+              plt.plot(np.array(kl_layer_train))
+              plt.savefig('{}/images/RBIG_trainKLbyLayer_{}_{}_run{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+              plt.close()
+
             kl_means, bpd_means, log_prob_means = [], [], []
-            # print('Check data type')
-            # pdb.set_trace()
             for li in range(n_layer):
               curr_kl = np.array(kl_layer[li])
               curr_bpd = np.array(bpd_layer[li])
@@ -203,12 +211,6 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
             plt.savefig('{}/images/RBIG_LogProbbyLayer_{}_{}_run{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
             plt.close()
 
-            if False: # TODO: check this
-              plt.close()
-              kls = np.array(kls)
-              plt.plot(np.log(kls))
-              plt.savefig('{}/images/RBIG_KLlog_{}_{}_layer{}_run{}_batch{}.png'.format(out_dir, args.dataset, args.rotation_type, prev_l, n_run, batch_idx))
-              plt.close()
           else:
             break
 
