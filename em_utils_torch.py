@@ -82,10 +82,13 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
         ica = FastICA()
         _ = ica.fit_transform(X.cpu())
         Aorig = ica.mixing_
-        _, ss, _ = np.linalg.svd(Aorig)
-        Aorig /= ss[0]
-        if ss[-1] / ss[0] < SINGULAR_SMALL:
-          Aorig += SINGULAR_SMALL * np.eye(Aorig.shape[0])
+
+        # avoid numerical instability
+        U, ss, V = np.linalg.svd(Aorig)
+        ss /= ss[0]
+        ss[ss < SINGULAR_SMALL] = SINGULAR_SMALL
+        Aorig = (U * ss).dot(V)
+
         A = np.linalg.inv(Aorig)
         _, ss, _ = np.linalg.svd(A)
         A = to_tensor(A / ss[0])
@@ -153,13 +156,13 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
                 curr_A[i,j] = sol
                 curr_obj = get_objetive(X, curr_A, pi, mu, sigma_sqr, w)
               newA[i,j] = sol
-          A = newA.double()
-          # _, ss, _ = torch.svd(A)
-          # A /= ss[0]
-          # if ss[-1] / ss[0] < SINGULAR_SMALL:
-          #   A += SINGULAR_SMALL * to_tensor(np.eye(A.shape[0]))
+          A = newA.double().T
+        # avoid numerical instability
         U, ss, V = torch.svd(A)
-        A /= ss[0]
+        ss /= ss[0]
+        ss[ss < SINGULAR_SMALL] = SINGULAR_SMALL
+        A = (U * ss).matmul(V)
+
         if TIME:
           if 'A' not in ret_time: ret_time['A'] = []
           ret_time['A'] += time() - a_start,
