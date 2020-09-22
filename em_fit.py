@@ -99,17 +99,17 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     iter_start = time()
     print('iteration {} - data={} - mode={}{}'.format(i, args.data, args.mode,
           '(grad {})'.format(args.grad_mode) if args.mode in ['GA', 'torchGA', 'torchAll'] else ''))
-      if TIME:
-        em_start = time()
-      A, pi, mu, sigma_sqr, grad_norms, objs, ret_time = update_EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
-                A_mode=A_mode, grad_mode=args.grad_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
-      if TIME:
-        for key in ret_time:
-          if key not in avg_time: avg_time[key] = []
-          avg_time[key] += ret_time[key],
-        avg_time['EM'] += time() - em_start,
-      if grad_norms:
-        grad_norms_total += np.array(grad_norms).mean(),
+    if TIME:
+      em_start = time()
+    A, pi, mu, sigma_sqr, grad_norms, objs, ret_time = update_EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
+              A_mode=A_mode, grad_mode=args.grad_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
+    if TIME:
+      for key in ret_time:
+        if key not in avg_time: avg_time[key] = []
+        avg_time[key] += ret_time[key],
+      avg_time['EM'] += time() - em_start,
+    if grad_norms:
+      grad_norms_total += np.array(grad_norms).mean(),
 
     if type(X) is torch.Tensor:
       Y = X.matmul(A.T)
