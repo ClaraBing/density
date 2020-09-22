@@ -52,93 +52,6 @@ def init_params(D, K, mu_low, mu_up):
 
   return A, pi, mu, sigma_sqr
 
-
-def update_ICA(X, K, gamma, A, pi, mu, sigma_sqr, A_first=False):
-  if not A_first:
-    Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr)
-    pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
-
-  cov = X.T.matmul(X) / len(X)
-  cnt = 0
-  n_tries = 20
-  while cnt < n_tries:
-    try:
-      ica = FastICA()
-      Y = ica.fit_transform(X.cpu())
-      Aorig = ica.mixing_
-      _, ss, _ = np.linalg.svd(Aorig)
-      Aorig /= ss[0]
-      Y *= ss[0]
-      if ss[-1] / ss[0] < SINGULAR_SMALL:
-        Aorig += SINGULAR_SMALL * np.eye(Aorig.shape[0])
-      A = np.linalg.inv(Aorig)
-      _, ss, _ = np.linalg.svd(A)
-      A = to_tensor(A / ss[0])
-      Y /= ss[0]
-      cnt = 2*n_tries
-    except:
-      cnt += 1
-  if cnt != 2*n_tries:
-    print('ICA failed. Use random.')
-    A = to_tensor(ortho_group.rvs(D))
-
-  if A_first:
-    Y = to_tensor(Y).T
-    Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr, Y=Y)
-    pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
-  return A, pi, mu, sigma_sqr
-
-
-def update_CF(X, K, gamma, A, pi, mu, sigma_sqr):
-  N, D = X.shape
-  Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr)
-  pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=Y)
-
-  if TIME: t_start = time()
-
-  det = torch.det(A)
-  if det < 0:
-    print("Closed form: det(A) < 0")
-    pdb.set_trace()
-  
-  cofs = get_cofactors(A)
-
-  obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-  newA = A.clone()
-  for i in range(D):
-    for j in range(D):
-      t1 = (w[:, i] * X[:,j,None]**2 / sigma_sqr[i]).sum() / N
-      diff = (Y[i] - A[i,j] * X[:, j])[:, None] - mu[i]
-      t2 = (w[:, i] * X[:,j,None] * diff / sigma_sqr[i]).sum() / N
-      c1 = t1 * cofs[i,j]
-      c2 = t1 * (det - A[i,j]*cofs[i,j]) + t2 * cofs[i,j]
-      c3 = t2 * (det - A[i,j]*cofs[i,j]) - cofs[i,j]
-      inner = c2**2 - 4*c1*c3
-      if inner < 0:
-        print('Problme at solving for A[{},{}]: no real sol.'.format(i,j))
-        pdb.set_trace()
-      if c1 == 0:
-        grad = -(c2 * A[i,j] + c3)
-        if grad < 0:
-          sol = -gamma
-        else:
-          sol = gamma
-      else:
-        sol = (inner**0.5 - c2) / (2*c1)
-      curr_A = newA.clone()
-      curr_A[i,j] = sol
-      curr_obj = get_objetive(X, curr_A, pi, mu, sigma_sqr, w)
-      newA[i,j] = sol
-  A = newA.double()
-  obj = get_objetive(X, A, pi, mu, sigma_sqr, w).item()
-         
-  if VERBOSE:
-    print('A:', A.view(-1))
-
-  if TIME: avg_time = {'CF': time()-t_start}
-  return A, pi, mu, sigma_sqr, obj, avg_time 
-
-
 def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
        A_mode='GA', grad_mode='GA',
        max_em_steps=30, n_gd_steps=20):
@@ -154,11 +67,34 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
   Y = None
   niters = 0
   dA, dsigma_sqr = 10, 10
-  avg_time = {}
-  time_A, time_E, time_GA, time_Y = [], [], [], []
-  time_obj, n_iters_btls = [], []
-  grad_norms = []
-  objs = []
+  ret_time = {'E':[], 'obj':[]}
+  grad_norms, objs= [], []
+
+  if A_mode == 'random':
+    A = ortho_group.rvs(D)
+    A = to_tensor(A)
+  elif A_mode == 'ICA':
+    cov = X.T.matmul(X) / len(X)
+    cnt = 0
+    n_tries = 20
+    while cnt < n_tries:
+      try:
+        ica = FastICA()
+        _ = ica.fit_transform(X.cpu())
+        Aorig = ica.mixing_
+        _, ss, _ = np.linalg.svd(Aorig)
+        Aorig /= ss[0]
+        if ss[-1] / ss[0] < SINGULAR_SMALL:
+          Aorig += SINGULAR_SMALL * np.eye(Aorig.shape[0])
+        A = np.linalg.inv(Aorig)
+        _, ss, _ = np.linalg.svd(A)
+        A = to_tensor(A / ss[0])
+        cnt = 2*n_tries
+      except:
+        cnt += 1
+    if cnt != 2*n_tries:
+      print('ICA failed. Use random.')
+      A = to_tensor(ortho_group.rvs(D))
 
   while (not END(dA, dsigma_sqr)) and niters < max_em_steps:
     niters += 1
@@ -167,50 +103,76 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
 
     if TIME: e_start = time()
     Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr, Y=Y)
-    if TIME: time_E += time() - e_start,
+    if TIME: ret_time['E'] += time() - e_start,
 
     # M-step
-    if A_mode == 'CF': # closed form
+    if A_mode == 'ICA':
       pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
+      obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+      objs[-1] += obj,
 
-      for _ in range(n_gd_steps):
-        det = torch.det(A)
-        if det < 0:
-          print("Closed form: det(A) < 0")
-          pdb.set_trace()
+    if A_mode == 'CF': # gradient ascent
+      if CHECK_OBJ:
+        objs[-1] += get_objetive(X, A, pi, mu, sigma_sqr, w),
+
+      for i in range(n_gd_steps):
+        ga_start = time()
+        if VERBOSE: print(A.view(-1))
         
-        cofs = get_cofactors(A)
+        pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
 
-        obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-        newA = A.clone()
-        for i in range(D):
-          for j in range(D):
-            t1 = (w[:, i] * X[:,j,None]**2 / sigma_sqr[i]).sum() / N
-            diff = (Y[i] - A[i,j] * X[:, j])[:, None] - mu[i]
-            t2 = (w[:, i] * X[:,j,None] * diff / sigma_sqr[i]).sum() / N
-            c1 = t1 * cofs[i,j]
-            c2 = t1 * (det - A[i,j]*cofs[i,j]) + t2 * cofs[i,j]
-            c3 = t2 * (det - A[i,j]*cofs[i,j]) - cofs[i,j]
-            inner = c2**2 - 4*c1*c3
-            if inner < 0:
-              print('Problme at solving for A[{},{}]: no real sol.'.format(i,j))
-              pdb.set_trace()
-            if c1 == 0:
-              grad = -(c2 * A[i,j] + c3)
-              if grad < 0:
-                sol = -gamma
+        if TIME: a_start = time()
+        if grad_mode == 'CF1':
+          A = set_grad_zero(X, A, w, mu, sigma_sqr)
+        elif grad_mode == 'CF2':
+          cofs = get_cofactors(A)
+          det = torch.det(A)
+          if det < 0: # TODO: ignore neg det for now
+            cofs = cofs * -1
+
+          newA = A.clone()
+          for i in range(D):
+            for j in range(D):
+              t1 = (w[:, i] * X[:,j,None]**2 / sigma_sqr[i]).sum() / N
+              diff = (Y[i] - A[i,j] * X[:, j])[:, None] - mu[i]
+              t2 = (w[:, i] * X[:,j,None] * diff / sigma_sqr[i]).sum() / N
+              c1 = t1 * cofs[i,j]
+              c2 = t1 * (det - A[i,j]*cofs[i,j]) + t2 * cofs[i,j]
+              c3 = t2 * (det - A[i,j]*cofs[i,j]) - cofs[i,j]
+              inner = c2**2 - 4*c1*c3
+              if inner < 0:
+                print('Problme at solving for A[{},{}]: no real sol.'.format(i,j))
+                pdb.set_trace()
+              if c1 == 0:
+                sol = - c3 / c2
               else:
-                sol = gamma
-            else:
-              sol = (inner**0.5 - c2) / (2*c1)
-            curr_A = newA.clone()
-            curr_A[i,j] = sol
-            curr_obj = get_objetive(X, curr_A, pi, mu, sigma_sqr, w)
-            newA[i,j] = sol
-        A = newA.double()
-        obj = get_objetive(X, A, pi, mu, sigma_sqr, w).item()
-        objs[-1] += obj,
+                sol = (inner**0.5 - c2) / (2*c1)
+              if False:
+                # check whether obj gets improved with each updated entry of A
+                curr_A = newA.clone()
+                curr_A[i,j] = sol
+                curr_obj = get_objetive(X, curr_A, pi, mu, sigma_sqr, w)
+              newA[i,j] = sol
+          A = newA.double()
+          # _, ss, _ = torch.svd(A)
+          # A /= ss[0]
+          # if ss[-1] / ss[0] < SINGULAR_SMALL:
+          #   A += SINGULAR_SMALL * to_tensor(np.eye(A.shape[0]))
+        U, ss, V = torch.svd(A)
+        A /= ss[0]
+        if TIME:
+          if 'A' not in ret_time: ret_time['A'] = []
+          ret_time['A'] += time() - a_start,
+          if 'GA' not in ret_time: ret_time['GA'] = []
+          ret_time['GA'] += time() - ga_start,
 
+        if CHECK_OBJ:
+          if TIME: obj_start = time()
+          obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+          if TIME: ret_time['obj'] += time() - obj_start,
+          objs[-1] += obj,
+          if VERBOSE:
+            print('iter {}: obj= {:.5f}'.format(i, obj))
     if A_mode == 'GA': # gradient ascent
       if CHECK_OBJ:
         objs[-1] += get_objetive(X, A, pi, mu, sigma_sqr, w),
@@ -222,179 +184,71 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
         pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
 
         if TIME: a_start = time()
-        if grad_mode == 'CF':
-          A = set_grad_zero(X, A, w, mu, sigma_sqr)
-        else:
-          # gradient steps
-          grad, y_time = get_grad(X, A, w, mu, sigma_sqr)
-          if TIME:
-            time_Y += y_time,
-          if grad_mode == 'BTLS':
-            # backtracking line search
+        # gradient steps
+        grad, y_time = get_grad(X, A, w, mu, sigma_sqr)
+        if TIME:
+          if 'Y' not in ret_time:
+            ret_time['Y'] = []
+          ret_time['Y'] += y_time,
+        if grad_mode == 'BTLS':
+          # backtracking line search
+          if TIME: obj_start = time()
+          obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+          if TIME: ret_time['obj'] += time() - obj_start,
+
+          beta, t, flag = 0.6, 1, True
+          gnorm = torch.norm(grad)
+          n_iter, ITER_LIM = 0, 10
+          while flag and n_iter < ITER_LIM:
+            n_iter += 1
+            Ap = A + t * grad
+            _, ss, _ = torch.svd(Ap)
+            Ap /= ss[0]
             if TIME: obj_start = time()
-            obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-            if TIME: time_obj += time() - obj_start,
+            obj_p = get_objetive(X, Ap, pi, mu, sigma_sqr, w)
+            if TIME: ret_time['obj'] += time() - obj_start,
+            t *= beta
+            base = obj - 0.5 * t * gnorm
+            flag = obj_p < base
+          gamma = t
+          ret_time['btls_nIters'] += n_iter,
+        elif grad_mode == 'perturb':
+          # perturb
+          perturb = A.std() * 0.1 * torch.randn(A.shape).type(DTYPE).to(device)
+          perturbed = A + perturb
+          perturbed_grad, _ = get_grad(X, perturbed, w, mu, sigma_sqr)
 
-            beta, t, flag = 0.6, 1, True
-            gnorm = torch.norm(grad)
-            n_iter, ITER_LIM = 0, 10
-            while flag and n_iter < ITER_LIM:
-              n_iter += 1
-              Ap = A + t * grad
-              _, ss, _ = torch.svd(Ap)
-              Ap /= ss[0]
-              if TIME: obj_start = time()
-              obj_p = get_objetive(X, Ap, pi, mu, sigma_sqr, w)
-              if TIME: time_obj += time() - obj_start,
-              t *= beta
-              base = obj - 0.5 * t * gnorm
-              flag = obj_p < base
-            gamma = t
-            n_iters_btls += n_iter,
-          elif grad_mode == 'perturb':
-            # perturb
-            perturb = A.std() * 0.1 * torch.randn(A.shape).type(DTYPE).to(device)
-            perturbed = A + perturb
-            perturbed_grad, _ = get_grad(X, perturbed, w, mu, sigma_sqr)
+          grad_diff = torch.norm(grad - perturbed_grad)
+          gamma = 1 /(EPS_GRAD + grad_diff) * 0.03
 
-            grad_diff = torch.norm(grad - perturbed_grad)
-            gamma = 1 /(EPS_GRAD + grad_diff) * 0.03
-
-          grad_norms += torch.norm(grad).item(),
-          A += gamma * grad
+        grad_norms += torch.norm(grad).item(),
+        A += gamma * grad
 
         _, ss, _ = torch.svd(A)
         A /= ss[0]
         if TIME:
-          time_A += time() - a_start,
-          time_GA += time() - ga_start,
+          if 'A' not in ret_time: ret_time['A'] = []
+          ret_time['A'] += time() - a_start,
+          if 'GA' not in ret_time: ret_time['GA'] = []
+          ret_time['GA'] += time() - ga_start,
 
         if CHECK_OBJ:
           if TIME: obj_start = time()
           obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-          if TIME: time_obj += time() - obj_start,
+          if TIME: ret_time['obj'] += time() - obj_start,
           objs[-1] += obj,
           if VERBOSE:
             print('iter {}: obj= {:.5f}'.format(i, obj))
-
-    elif A_mode == 'torchGA': # gradient ascent with torch
-      if CHECK_OBJ:
-        obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-        objs[-1] += obj.item(),
-
-      A.requires_grad = True
-      optimizer = optim.Adam([A], lr=gamma)
-
-      for i in range(n_gd_steps):
-        ga_start = time()
-        if VERBOSE: print(A.view(-1))
-        
-        pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
-
-        if TIME:
-          a_start = time()
-          obj_start = time()
-
-        optimizer.zero_grad()
-        obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-        objs[-1] += obj.item(),
-        obj *= -1
-        if TIME: time_obj += time() - obj_start,
-        if VERBOSE: print('iter {}: obj= {:.5f}'.format(i, obj.item()))
-
-        obj.backward()
-        A.grad[torch.where(torch.isnan(A.grad))] = 0
-        optimizer.step()
-        # _, ss, _ = torch.svd(A)
-        # A /= ss[0]
-        if TIME:
-          time_A += time() - a_start,
-          time_GA += time() - ga_start,
-        grad_norms += torch.norm(A.grad).item(),
-
-        sgd_grad = A.grad
-        grad, y_time = get_grad(X, A, w, mu, sigma_sqr)
-        
-      A = A.detach()
-      pi = pi.detach()
-      mu = mu.detach()
-      sigma_sqr = sigma_sqr.detach()
-      w = w.detach()
-
-      # normalize
-      _, ss, _ = torch.svd(A)
-      A = A/ss[0]
-
-    elif A_mode == 'torchAll': # gradient ascent with torch
-      if CHECK_OBJ:
-        obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-        objs[-1] += obj.item(),
-
-      A.requires_grad = True
-      pi.requires_grad = True
-      mu.requires_grad = True
-      sigma_sqr.requires_grad = True
-      w.requires_grad = True
-
-      optimizer = optim.SGD([A, pi, mu, sigma_sqr, w], lr=gamma)
-
-      for i in range(n_gd_steps):
-        ga_start = time()
-        if VERBOSE: print(A.view(-1))
-        
-        if TIME:
-          a_start = time()
-          obj_start = time()
-
-        optimizer.zero_grad()
-        obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-        objs[-1] += obj.item(),
-        obj *= -1
-        if TIME: time_obj += time() - obj_start,
-        if VERBOSE: print('iter {}: obj= {:.5f}'.format(i, obj.item()))
-
-        obj.backward()
-        optimizer.step()
-        # _, ss, _ = torch.svd(A)
-        # A /= ss[0]
-        if TIME:
-          time_A += time() - a_start,
-          time_GA += time() - ga_start,
-        grad_norms += torch.norm(A.grad).item(),
-        # print('A:', A.view(-1))
-        
-      A = A.detach()
-      pi = pi.detach()
-      mu = mu.detach()
-      sigma_sqr = sigma_sqr.detach()
-      w = w.detach()
-
-      # normalize
-      _, ss, _ = torch.svd(A)
-      A = A/ss[0]
-      pi[pi < 0] = SMALL
-      pi /= pi.sum(1, keepdim=True)
-           
-    # difference from the previous iterate
-    dA, dsigma_sqr = torch.norm(A - A_prev), torch.norm(sigma_sqr.view(-1) - sigma_sqr_prev.view(-1))
 
   if VERBOSE:
     print('#{}: dA={:.3e} / dsigma_sqr={:.3e}'.format(niters, dA, dsigma_sqr))
     print('A:', A.view(-1))
 
   if TIME:
-    avg_time = {
-      'A': np.array(time_A).mean() if time_A else 0,
-      'E': np.array(time_E).mean() if time_E else 0,
-      'GA': np.array(time_GA).mean() if time_GA else 0,
-      'Y': np.array(time_Y).mean() if time_Y else 0,
-      'obj': np.array(time_obj).mean() if time_obj else 0,
-      'btls_nIters': np.array(n_iters_btls).mean() if n_iters_btls else 0,
-    }
+    for key in ret_time:
+      ret_time[key] = np.array(ret_time[key]) if ret_time[key] else 0
 
-  if A_mode == 'CF':
-    return A, pi, mu, sigma_sqr, objs, avg_time 
-  return A, pi, mu, sigma_sqr, grad_norms, objs, avg_time 
+  return A, pi, mu, sigma_sqr, grad_norms, objs, ret_time 
 
 # util funcs in EM steps
 def E(X, A, pi, mu, sigma_sqr, Y=None):
@@ -444,7 +298,7 @@ def get_objetive(X, A, pi, mu, sigma_sqr, w, Y=None):
   if torch.isnan(obj):
     print('objective is NaN.') 
     pdb.set_trace()
-  return obj
+  return obj.item()
 
 def set_grad_zero(X, A, w, mu, sigma_sqr):
   N, D, K = w.shape
