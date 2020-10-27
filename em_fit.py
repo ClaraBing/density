@@ -35,6 +35,8 @@ parser.add_argument('--data', type=str, default='GM', choices=[
        # images,
        'MNIST',
        ])
+parser.add_argument('--pca-dim', type=int, default=0,
+                   help="PCA dimension for high-dim data e.g. MNIST.")
 parser.add_argument('--save-token', type=str, default='')
 parser.add_argument('--save-dir', type=str)
 parser.add_argument('--time', type=int, default=0)
@@ -46,12 +48,36 @@ if args.lib == 'np':
 elif args.lib == 'torch':
   from em_utils_torch import *
 
+ga_token = ''
+if args.mode not in ['ICA', 'random']:
+  ga_token = '_'+args.grad_mode
+if args.grad_mode == 'GA':
+  ga_token += '_gamma{}_gammaMin{}'.format(args.gamma, args.gamma_min)
+args.save_dir = '{}/mode{}_K{}_iter{}_em{}_gd{}{}'.format(
+      args.data, args.mode, args.K, args.n_steps, args.n_em, args.n_gd, ga_token)
+if args.n_pts:
+  args.save_dir += '_nPts{}'.format(args.n_pts)
+if args.save_token:
+  args.save_dir += '_' + args.save_token
+
+try:
+  import wandb
+  wandb.init(project='density', name=args.save_dir, config=args)
+  USE_WANDB = True
+except Exception as e:
+  print('Exception:', e)
+  print('Not using wandb. \n\n')
+  USE_WANDB = False
+
 SAVE_ROOT = 'runs_gaussianization'
 SAVE_NPY = False
 VERBOSE = False
 
 TIME=args.time
 CHECK_OBJ=args.check_obj
+
+data_dir = './datasets/'
+args.save_dir = os.path.join(SAVE_ROOT, args.save_dir)
 
 def fit(X, Xtest, mu_low, mu_up, data_token=''):
   x = X
@@ -141,7 +167,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     if TIME:
       avg_time['G1D'] += time() - g1d_start,
       kl_start = time()
-    check_cov(X)
+    diff_from_I = check_cov(X)
     log_det += compute_log_det(Y, X, pi, mu, sigma_sqr, A, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right)
     kl = eval_KL(X, log_det)
     KLs += kl,
@@ -159,7 +185,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
 
     # check on test data
     Xtest, cdf_mask_test, [log_cdf_test, cdf_mask_left_test], [log_sf_test, cdf_mask_right_test] = gaussianize_1d(Ytest, pi, mu, sigma_sqr)
-    check_cov(Xtest)
+    diff_from_I_test = check_cov(Xtest)
     x = Xtest
     fimg = 'figs/hist2d_test_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)
@@ -172,6 +198,14 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     KLs_test += kl_test,
     print('KL (test):', kl_test)
     print()
+
+    if USE_WANDB:
+      wandb.log({
+        'KL': kl,
+        'KLtest': kl_test,
+        'diff_from_I': diff_from_I,
+        'diff_from_Itest': diff_from_I_test
+        })
 
     if args.save_dir:
       if SAVE_NPY:
@@ -238,20 +272,6 @@ if __name__ == '__main__':
   # test()
   # gen_data()
 
-  data_dir = './datasets/'
-  ga_token = ''
-  if args.mode not in ['ICA', 'random']:
-    ga_token = '_'+args.grad_mode
-  if args.grad_mode == 'GA':
-    ga_token += '_gamma{}_gammaMin{}'.format(args.gamma, args.gamma_min)
-  args.save_dir = '{}/mode{}_K{}_iter{}_em{}_gd{}{}'.format(
-        args.data, args.mode, args.K, args.n_steps, args.n_em, args.n_gd, ga_token)
-  if args.n_pts:
-    args.save_dir += '_nPts{}'.format(args.n_pts)
-  if args.save_token:
-    args.save_dir += '_' + args.save_token
-
-  args.save_dir = os.path.join(SAVE_ROOT, args.save_dir)
   if os.path.exists(args.save_dir):
     proceed = input('Dir exist: {} \n Do you want to proceed? (y/N)'.format(args.save_dir))
     if 'y' not in proceed:
@@ -313,8 +333,8 @@ if __name__ == '__main__':
     fdata_val = 'miniboone/val_normed.npy'
   elif data_token == 'MNIST':
     mnist_dir = 'mnist/MNIST/processed'
-    fdata = os.path.join(mnist_dir, 'train_normed_pca700.npy')
-    fdata_val = os.path.join(mnist_dir, 'test_normed_pca700.npy')
+    fdata = os.path.join(mnist_dir, 'train_normed_pca{}.npy'.format(args.pca_dim))
+    fdata_val = os.path.join(mnist_dir, 'test_normed_pca{}.npy'.format(args.pca_dim))
   
   data_token += args.save_token
 
