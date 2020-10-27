@@ -178,15 +178,15 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         if TIME:
           save_start = time()
         if args.lib == 'torch':
-          np.save(os.path.join(args.save_dir, 'A_i{}.npy'.format(i)), A.cpu().numpy())
-          np.save(os.path.join(args.save_dir, 'pi_i{}.npy'.format(i)), pi.cpu().numpy())
-          np.save(os.path.join(args.save_dir, 'mu_i{}.npy'.format(i)), mu.cpu().numpy())
-          np.save(os.path.join(args.save_dir, 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr.cpu().numpy())
+          np.save(os.path.join(args.save_dir, 'model', 'A_i{}.npy'.format(i)), A.cpu().numpy())
+          np.save(os.path.join(args.save_dir, 'model', 'pi_i{}.npy'.format(i)), pi.cpu().numpy())
+          np.save(os.path.join(args.save_dir, 'model', 'mu_i{}.npy'.format(i)), mu.cpu().numpy())
+          np.save(os.path.join(args.save_dir, 'model', 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr.cpu().numpy())
         else:
-          np.save(os.path.join(args.save_dir, 'A_i{}.npy'.format(i)), A)
-          np.save(os.path.join(args.save_dir, 'pi_i{}.npy'.format(i)), pi)
-          np.save(os.path.join(args.save_dir, 'mu_i{}.npy'.format(i)), mu)
-          np.save(os.path.join(args.save_dir, 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr)
+          np.save(os.path.join(args.save_dir, 'model', 'A_i{}.npy'.format(i)), A)
+          np.save(os.path.join(args.save_dir, 'model', 'pi_i{}.npy'.format(i)), pi)
+          np.save(os.path.join(args.save_dir, 'model', 'mu_i{}.npy'.format(i)), mu)
+          np.save(os.path.join(args.save_dir, 'model', 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr)
         if TIME:
           avg_time['save'] += time() - save_start,
         np.save(os.path.join(args.save_dir, 'KLs.npy'), np.array(KLs))
@@ -258,6 +258,7 @@ if __name__ == '__main__':
       print('Exiting. Bye!')
       exit(0)
   os.makedirs(args.save_dir, exist_ok=True)
+  os.makedirs(os.path.join(args.save_dir, 'model'), exist_ok=True)
   os.makedirs(os.path.join(args.save_dir, 'figs'), exist_ok=True)
   if CHECK_OBJ:
     os.makedirs(os.path.join(args.save_dir, 'figs', 'objs'), exist_ok=True)  
