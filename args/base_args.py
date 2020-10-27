@@ -28,6 +28,8 @@ class BaseArgs:
                              help='Number of layers (iterations) used for RBIG.')
     self.parser.add_argument('--rotation-type', type=str, choices=['random', 'PCA', 'ICA'],
                              help="Rotation type for RBIG.")
+    self.parser.add_argument('--inverse-cdf-by-thresh', type=int, default=0, choices=[0,1],
+                             help="RBIG: whether to calc the per-dim Gaussianized data with a thresholded CDF.")
     # Data
     self.parser.add_argument('--dataset', type=str, choices=['cifar10', 'MNIST', 'FashionMNIST',
                              'GAS8', 'GAS16', 'GAS128', 'miniboone',

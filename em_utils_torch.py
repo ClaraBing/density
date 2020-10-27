@@ -109,7 +109,7 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
     if TIME: ret_time['E'] += time() - e_start,
 
     # M-step
-    if A_mode == 'ICA':
+    if A_mode == 'ICA' or A_mode == 'None':
       pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
       obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
       objs[-1] += obj,
@@ -119,7 +119,7 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
         objs[-1] += get_objetive(X, A, pi, mu, sigma_sqr, w),
 
       for i in range(n_gd_steps):
-        ga_start = time()
+        cf_start = time()
         if VERBOSE: print(A.view(-1))
         
         pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
@@ -127,6 +127,7 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
         if TIME: a_start = time()
         if grad_mode == 'CF1':
           A = set_grad_zero(X, A, w, mu, sigma_sqr)
+          A = A.T
         elif grad_mode == 'CF2':
           cofs = get_cofactors(A)
           det = torch.det(A)
@@ -156,18 +157,19 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
                 curr_A[i,j] = sol
                 curr_obj = get_objetive(X, curr_A, pi, mu, sigma_sqr, w)
               newA[i,j] = sol
-          A = newA.double().T
+          A = newA.double()
+
         # avoid numerical instability
         U, ss, V = torch.svd(A)
-        ss /= ss[0]
+        ss = ss / ss[0]
         ss[ss < SINGULAR_SMALL] = SINGULAR_SMALL
         A = (U * ss).matmul(V)
 
         if TIME:
           if 'A' not in ret_time: ret_time['A'] = []
           ret_time['A'] += time() - a_start,
-          if 'GA' not in ret_time: ret_time['GA'] = []
-          ret_time['GA'] += time() - ga_start,
+          if 'CF' not in ret_time: ret_time['CF'] = []
+          ret_time['CF'] += time() - cf_start,
 
         if CHECK_OBJ:
           if TIME: obj_start = time()
@@ -176,6 +178,9 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
           objs[-1] += obj,
           if VERBOSE:
             print('iter {}: obj= {:.5f}'.format(i, obj))
+        # pdb.set_trace()
+      # pdb.set_trace()
+
     if A_mode == 'GA': # gradient ascent
       if CHECK_OBJ:
         objs[-1] += get_objetive(X, A, pi, mu, sigma_sqr, w),
@@ -229,6 +234,7 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
 
         _, ss, _ = torch.svd(A)
         A /= ss[0]
+
         if TIME:
           if 'A' not in ret_time: ret_time['A'] = []
           ret_time['A'] += time() - a_start,
@@ -242,6 +248,8 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
           objs[-1] += obj,
           if VERBOSE:
             print('iter {}: obj= {:.5f}'.format(i, obj))
+        # pdb.set_trace()
+      # pdb.set_trace()
 
   if VERBOSE:
     print('#{}: dA={:.3e} / dsigma_sqr={:.3e}'.format(niters, dA, dsigma_sqr))
@@ -251,6 +259,7 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
     for key in ret_time:
       ret_time[key] = np.array(ret_time[key]) if ret_time[key] else 0
 
+  # pdb.set_trace()
   return A, pi, mu, sigma_sqr, grad_norms, objs, ret_time 
 
 # util funcs in EM steps

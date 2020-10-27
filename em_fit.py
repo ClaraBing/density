@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import pickle
 import torch
 from scipy.stats import ortho_group
 import argparse
@@ -21,9 +22,7 @@ parser.add_argument('--gamma-min', type=float, default=0.001)
 parser.add_argument('--n-steps', type=int, default=50)
 parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
-parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'torchGA', 'torchAll', 'CF', 'ICA'])
-parser.add_argument('--A-first', type=int, default=1, choices=[0,1],
-                    help="For ICA: whether to update A first (i.e. before estimating other params).")
+parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'torchGA', 'torchAll', 'CF', 'ICA', 'random', 'None'])
 parser.add_argument('--grad-mode', type=str, default='GA', choices=['GA', 'CF1', 'CF2', 'BTLS', 'perturb'],
                     help="Ways to update A in EM iterates.")
 parser.add_argument('--data', type=str, default='GM', choices=[
@@ -93,7 +92,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
 
   grad_norms_total = []
   if TIME:
-    avg_time = {'EM':[], 'KL':[], 'G1D':[], 'save':[]}
+    avg_time = {'EM':[], 'KL':[], 'G1D':[], 'save':[], 'iter':[]}
     default_keys = list(avg_time.keys())
   for i in range(n_steps):
     iter_start = time()
@@ -141,12 +140,14 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     X, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right] = gaussianize_1d(Y, pi, mu, sigma_sqr)
     if TIME:
       avg_time['G1D'] += time() - g1d_start,
-      nll_start = time()
+      kl_start = time()
     check_cov(X)
     log_det += compute_log_det(Y, X, pi, mu, sigma_sqr, A, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right)
     kl = eval_KL(X, log_det)
     KLs += kl,
     print('KL:', kl)
+    if TIME:
+      avg_time['KL'] += time() - kl_start,
 
     x = X
     fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
@@ -172,26 +173,27 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     print('KL (test):', kl_test)
     print()
 
-    if args.save_dir and SAVE_NPY:
-      if TIME:
-        save_start = time()
-      if args.lib == 'torch':
-        np.save(os.path.join(args.save_dir, 'A_i{}.npy'.format(i)), A.cpu().numpy())
-        np.save(os.path.join(args.save_dir, 'pi_i{}.npy'.format(i)), pi.cpu().numpy())
-        np.save(os.path.join(args.save_dir, 'mu_i{}.npy'.format(i)), mu.cpu().numpy())
-        np.save(os.path.join(args.save_dir, 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr.cpu().numpy())
-      else:
-        np.save(os.path.join(args.save_dir, 'A_i{}.npy'.format(i)), A)
-        np.save(os.path.join(args.save_dir, 'pi_i{}.npy'.format(i)), pi)
-        np.save(os.path.join(args.save_dir, 'mu_i{}.npy'.format(i)), mu)
-        np.save(os.path.join(args.save_dir, 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr)
-      if TIME:
-        avg_time['save'] += time() - save_start,
-      np.save(os.path.join(args.save_dir, 'KLs.npy'), np.array(KLs))
+    if args.save_dir:
+      if SAVE_NPY:
+        if TIME:
+          save_start = time()
+        if args.lib == 'torch':
+          np.save(os.path.join(args.save_dir, 'A_i{}.npy'.format(i)), A.cpu().numpy())
+          np.save(os.path.join(args.save_dir, 'pi_i{}.npy'.format(i)), pi.cpu().numpy())
+          np.save(os.path.join(args.save_dir, 'mu_i{}.npy'.format(i)), mu.cpu().numpy())
+          np.save(os.path.join(args.save_dir, 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr.cpu().numpy())
+        else:
+          np.save(os.path.join(args.save_dir, 'A_i{}.npy'.format(i)), A)
+          np.save(os.path.join(args.save_dir, 'pi_i{}.npy'.format(i)), pi)
+          np.save(os.path.join(args.save_dir, 'mu_i{}.npy'.format(i)), mu)
+          np.save(os.path.join(args.save_dir, 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr)
+        if TIME:
+          avg_time['save'] += time() - save_start,
+        np.save(os.path.join(args.save_dir, 'KLs.npy'), np.array(KLs))
+        np.save(os.path.join(args.save_dir, 'KLs_test.npy'), np.array(KLs_test))
       plt.plot(np.array(KLs))
       plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log.png'))
       plt.close()
-      np.save(os.path.join(args.save_dir, 'KLs_test.npy'), np.array(KLs_test))
       plt.plot(np.array(KLs_test))
       plt.savefig(os.path.join(args.save_dir, 'figs', 'KLtest_log.png'))
       plt.close()
@@ -199,14 +201,14 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     if TIME:
       avg_time['iter'] += time() - iter_start,
       print("Timing (data={} / K={} / n_pts={} ):".format(args.data, args.K, args.n_pts))
-      print('EM: {:.4e}'.format(np.array(time_em).mean()))
+      print('EM: {:.4e}'.format(np.array(avg_time['EM']).mean()))
       for key in avg_time:
         if key not in default_keys:
           # time returned from EM call
           print('--  {}: {:.4e}'.format(key, np.array(avg_time[key]).mean()))
       print('G1D : {:.4e}'.format(np.array(avg_time['G1D']).mean()))
-      print('KL  : {:.4e}'.format(np.array(avg_time['KL'].mean())))
-      print('Save: {:.4e}'.format(np.array(avg_time['save']).mean()))
+      print('KL  : {:.4e}'.format(np.array(avg_time['KL']).mean()))
+      print('Save: {:.4e}'.format(np.array(avg_time['save']).mean() if avg_time['save'] else 0))
       print()
   if TIME:
     ftime = os.path.join(args.save_dir, 'time.pkl')
@@ -238,18 +240,17 @@ if __name__ == '__main__':
 
   data_dir = './datasets/'
   ga_token = ''
-  if args.mode in ['GA', 'torchGA']:
+  if args.mode not in ['ICA', 'random']:
     ga_token = '_'+args.grad_mode
-    if args.grad_mode == 'GA':
-      ga_token = '_gamma{}_gammaMin{}'.format(args.gamma, args.gamma_min)
-  elif args.mode == 'CF':
-    ga_token = '_gamma{}'.format(args.gamma)
+  if args.grad_mode == 'GA':
+    ga_token += '_gamma{}_gammaMin{}'.format(args.gamma, args.gamma_min)
   args.save_dir = '{}/mode{}_K{}_iter{}_em{}_gd{}{}'.format(
         args.data, args.mode, args.K, args.n_steps, args.n_em, args.n_gd, ga_token)
   if args.n_pts:
     args.save_dir += '_nPts{}'.format(args.n_pts)
   if args.save_token:
     args.save_dir += '_' + args.save_token
+
   args.save_dir = os.path.join(SAVE_ROOT, args.save_dir)
   if os.path.exists(args.save_dir):
     proceed = input('Dir exist: {} \n Do you want to proceed? (y/N)'.format(args.save_dir))
@@ -311,8 +312,8 @@ if __name__ == '__main__':
     fdata_val = 'miniboone/val_normed.npy'
   elif data_token == 'MNIST':
     mnist_dir = 'mnist/MNIST/processed'
-    fdata = os.path.join(mnist_dir, 'train_normed.npy')
-    fdata_val = os.path.join(mnist_dir, 'test_normed.npy')
+    fdata = os.path.join(mnist_dir, 'train_normed_pca700.npy')
+    fdata_val = os.path.join(mnist_dir, 'test_normed_pca700.npy')
   
   data_token += args.save_token
 
