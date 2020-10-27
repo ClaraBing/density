@@ -258,23 +258,34 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
                  channel=channel, image_size=image_size, process_size=10)
       else:
         if data_anchors[0].shape[1] > 2:
-          v1 = np.random.randn(data_anchors[0].shape[1])
-          v2 = np.random.randn(data_anchors[0].shape[1])
-          v2 -= v1.dot(v2) * v1
-          v1 /= np.linalg.norm(v1)
-          v2 /= np.linalg.norm(v2)
-          proj_mtrx = np.stack([v1, v2]).T
+          proj_mtrxs = []
+          for _ in range(10):
+            v1 = np.random.randn(data_anchors[0].shape[1])
+            v2 = np.random.randn(data_anchors[0].shape[1])
+            v2 -= v1.dot(v2) * v1
+            v1 /= np.linalg.norm(v1)
+            v2 /= np.linalg.norm(v2)
+            proj_mtrx = np.stack([v1, v2]).T
+            proj_mtrxs += proj_mtrx,
         # args.dataset in ['GaussianLine', 'GaussianMixture', 'uniform']:
         for li, pts in enumerate(data_anchors):
           pts = pts.cpu().numpy()
           plt.figure(figsize=[8,8])
 
-          img2d = pts.dot(proj_mtrx) if pts.shape[1] > 2 else pts
-          plt.hist2d(img2d[:,0], img2d[:,1], bins=[100,100])
-          plt.xlim([-2.5, 2.5])
-          plt.ylim([-2.5, 2.5])
-          plt.savefig('{}/images/RBIG_transformed_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, li, n_run))
-          plt.close()
+          if pts.shape[1] == 2:
+            plt.hist2d(img2d[:,0], img2d[:,1], bins=[100,100])
+            plt.xlim([-2.5, 2.5])
+            plt.ylim([-2.5, 2.5])
+            plt.savefig('{}/images/RBIG_transformed_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, li, n_run))
+            plt.close()
+          else:
+            for pi,proj_mtrx in enumerate(proj_mtrxs):
+              img2d = pts.dot(proj_mtrx)
+              plt.hist2d(img2d[:,0], img2d[:,1], bins=[100,100])
+              plt.xlim([-2.5, 2.5])
+              plt.ylim([-2.5, 2.5])
+              plt.savefig('{}/images/RBIG_transformed_{}_{}_layer{}_run{}_proj{}.png'.format(out_dir, args.dataset, args.rotation_type, li, n_run, pi))
+              plt.close()
         if False: # TODO: remove this
           sampling(rotation_matrices, data_anchors.copy(), bandwidths.copy(),
                    image_name='{}/images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, args.n_layer, n_run),
