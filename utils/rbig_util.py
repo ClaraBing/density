@@ -308,10 +308,11 @@ def check_cov(X):
   diag = torch.diag(cov).cpu().numpy()
   _, ss, _ = torch.svd(cov)
   ss = ss.cpu().numpy()
-  print('check cov: diag: max={} / min={} / mean={} / std={}'.format(
+  print('check cov:')
+  print('  diag: max={} / min={} / mean={} / std={}'.format(
     diag.max(), diag.min(), diag.mean(), diag.std()))
-  print('check cov: ss: max={} / min={} / mean={} / std={}'.format(
+  print('  ss: max={} / min={} / mean={} / std={}'.format(
     ss.max(), ss.min(), ss.mean(), ss.std()))
-  print('check cov: diff from I: {}'.format(torch.norm(torch.eye(D).to(device) - cov).item()))
+  print('  diff from I: {}'.format(torch.norm(torch.eye(D).to(device) - cov).item()))
 
 
