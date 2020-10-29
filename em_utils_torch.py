@@ -496,7 +496,9 @@ def check_cov(X):
   ss = ss.cpu().numpy()
   print('  ss: max={:.4e} / min={:.4e} / mean={:.4e} / std={:.4e}'.format(
     ss.max(), ss.min(), ss.mean(), ss.std()))
-  print('  diff from I: {:.4e}'.format(torch.norm(torch.eye(D).to(device) - cov).item()))
+  diff_from_I = torch.norm(torch.eye(D).to(device) - cov).item()
+  print('  diff from I: {:.4e}'.format(diff_from_I))
+  return diff_from_I
 
 def get_cofactors(A):
   cofs = torch.zeros_like(A)
