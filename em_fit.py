@@ -167,7 +167,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     if TIME:
       avg_time['G1D'] += time() - g1d_start,
       kl_start = time()
-    diff_from_I = check_cov(X)
+    diff_from_I, sigma_max, sigma_min, sigma_mean = check_cov(X)
     log_det += compute_log_det(Y, X, pi, mu, sigma_sqr, A, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right)
     kl = eval_KL(X, log_det)
     KLs += kl,
@@ -185,7 +185,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
 
     # check on test data
     Xtest, cdf_mask_test, [log_cdf_test, cdf_mask_left_test], [log_sf_test, cdf_mask_right_test] = gaussianize_1d(Ytest, pi, mu, sigma_sqr)
-    diff_from_I_test = check_cov(Xtest)
+    diff_from_I_test, sigma_max_test, sigma_min_test, sigma_mean_test = check_cov(Xtest)
     x = Xtest
     fimg = 'figs/hist2d_test_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
     fimg = os.path.join(args.save_dir, fimg)
@@ -204,7 +204,13 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         'KL': kl,
         'KLtest': kl_test,
         'diff_from_I': diff_from_I,
-        'diff_from_Itest': diff_from_I_test
+        'diff_from_Itest': diff_from_I_test,
+        'sigma_max': sigma_max,
+        'sigma_min': sigma_min,
+        'sigma_max_test': sigma_max_test,
+        'sigma_min_test': sigma_min_test,
+        'sigma_mean': sigma_mean,
+        'sigma_mean_test': sigma_mean_test
         })
 
     if args.save_dir:
