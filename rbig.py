@@ -26,8 +26,29 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 TIME = 0
 
 args = args.TrainArgs().parse()
-
 os.makedirs('images', exist_ok = True)
+out_dir = '{}_L{}_bt{}{}'.format(args.rotation_type, args.n_layer, args.bt, args.save_suffix)
+args.wb_name = out_dir
+out_dir = os.path.join('outputs/', 'RBIG', args.dataset, out_dir)
+
+if os.path.exists(out_dir):
+  print('Dir exist:', out_dir)
+  proceed = input("Do you want to proceed? (y/N)")
+  if 'y' not in proceed:
+    print('Exiting. Bye!')
+    exit(0)
+print("out_dir:", out_dir)
+os.makedirs(out_dir, exist_ok=True)
+os.makedirs(os.path.join(out_dir, 'images'), exist_ok=True)
+
+try:
+  import wandb
+  wandb.init(project='density', name=args.wb_name, config=args)
+  USE_WANDB = True
+except Exception as e:
+  print('Exception:', e)
+  print('Not using wandb. \n\n')
+  USE_WANDB = False
 
 # fix random seed
 def set_seed(seed=None):
@@ -40,7 +61,7 @@ def set_seed(seed=None):
       torch.backends.cudnn.deterministic = True
       torch.backends.cudnn.benchmark = False
 
-def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_dir='outputs/'):
+def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='outputs/'):
   test_bpd = 0
   val_loss = 0
   val_log_prob = 0
@@ -148,20 +169,36 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
                                                          log_cdf_l_train, cdf_mask_left_train, log_sf_l_train, cdf_mask_right_train, h=bandwidth)
                         train_loss_curr_layer, train_log_prob_curr_layer = flow_loss(cur_data_batch, log_det)
                         kl_layer_train += train_loss_curr_layer.item(),
+                        if USE_WANDB:
+                          wandb.log({'KL':train_loss_curr_layer.item()})
 
                       if TIME:
                         times['inverse_cdf'] += time() - start,
                       # rotation
                       cur_data_batch = torch.mm(inverse_data, rotation_matrices[prev_l])
-
                       update_data_arrays.append(cur_data_batch)
+                      diff_from_I, sigma_max, sigma_min, sigma_mean = check_cov(cur_data_batch)
+
                   if TIME:
                     times['cur_data_proc'] += time() - proc_start,
                   cur_data = torch.cat(update_data_arrays, dim=0)
                   data_anchors.append(cur_data[:cur_data.shape[0]])
+
               val_loss_curr_layer, val_log_prob_curr_layer = flow_loss(data, log_det)
-              check_cov(data)
+              diff_from_Itest, sigma_max_test, sigma_min_test, sigma_mean_test = check_cov(data)
               kl_layer[prev_l] += val_loss_curr_layer.item(),
+              if USE_WANDB:
+                wandb.log({
+                  'KLtest': val_loss_curr_layer.item(),
+                  'diff_from_I': diff_from_I,
+                  'diff_from_Itest': diff_from_Itest,
+                  'sigma_max': sigma_max,
+                  'sigma_max_test': sigma_max_test,
+                  'sigma_min': sigma_min,
+                  'sigma_min_test': sigma_min_test,
+                  'sigma_mean': sigma_mean,
+                  'sigma_mean_test': sigma_mean_test,
+                })
               test_bpd_curr_layer = (val_loss_curr_layer.item() * data.shape[0] - log_det_logit) * (
                       1 / (np.log(2) * np.prod(data.shape))) + 8
               bpd_layer[prev_l] += test_bpd_curr_layer.item(),
@@ -171,7 +208,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
             if TIME:
               start = time()
             val_loss_r, val_log_prob_r = flow_loss(data, log_det)
-            check_cov(data)
+            diff_from_I, smax, smin, smean = check_cov(data)
             if TIME:
               times['flow_loss'] += time() - start,
             test_bpd_r = (val_loss_r.item() * data.shape[0] - log_det_logit) * (
@@ -179,6 +216,10 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
             test_bpd += test_bpd_r * data.shape[0]
             val_loss += val_loss_r * data.shape[0]
             val_log_prob += val_log_prob_r * data.shape[0]
+            if USE_WANDB:
+              wandb.log({
+                'val_loss_r': val_loss_r,
+                'val_log_prob_r': val_log_prob_r})
 
             if not SILENT and log_batch and batch_idx % 100 == 0:
                 print("Batch {} loss {} (log prob: {}) bpd {}".format(batch_idx, val_loss_r, val_log_prob, test_bpd_r))
@@ -187,7 +228,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
               if VERBOSE:
                 print('Train KL: {}\n'.format(' / '.join(['layer{}: {:.4e}'.format(i+1, kl_train) for (i, kl_train) in enumerate(kl_layer_train)])))
               plt.plot(np.array(kl_layer_train))
-              plt.savefig('{}/images/RBIG_trainKLbyLayer_{}_{}_run{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+              plt.savefig('{}/images/RBIG_trainKLbyLayer_{}_{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type))
               plt.close()
 
             kl_means, bpd_means, log_prob_means = [], [], []
@@ -202,13 +243,13 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
               bpd_means += curr_bpd.mean(),
               log_prob_means += curr_log_prob.mean(),
             plt.plot(kl_means)
-            plt.savefig('{}/images/RBIG_KLbyLayer_{}_{}_run{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+            plt.savefig('{}/images/RBIG_KLbyLayer_{}_{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type))
             plt.close()
             plt.plot(bpd_means)
-            plt.savefig('{}/images/RBIG_BPDbyLayer_{}_{}_run{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+            plt.savefig('{}/images/RBIG_BPDbyLayer_{}_{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type))
             plt.close()
             plt.plot(log_prob_means)
-            plt.savefig('{}/images/RBIG_LogProbbyLayer_{}_{}_run{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+            plt.savefig('{}/images/RBIG_LogProbbyLayer_{}_{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type))
             plt.close()
 
           else:
@@ -221,7 +262,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
            li, kl_layer[li].mean(), kl_layer[li].std(), kl_layer[li].max(), kl_layer[li].min()))
       print()
       plt.plot([each.mean() for each in kl_layer])
-      plt.savefig('{}/images/RBIG_KLbyLayer_{}_{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+      plt.savefig('{}/images/RBIG_KLbyLayer_{}_{}.png'.format(out_dir, args.dataset, args.rotation_type))
       plt.close()
 
       print('BPD by layer.')
@@ -231,7 +272,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
            li, bpd_layer[li].mean(), bpd_layer[li].std(), bpd_layer[li].max(), bpd_layer[li].min()))
       print()
       plt.plot([each.mean() for each in bpd_layer])
-      plt.savefig('{}/images/RBIG_BPDbyLayer_{}_{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+      plt.savefig('{}/images/RBIG_BPDbyLayer_{}_{}.png'.format(out_dir, args.dataset, args.rotation_type))
       plt.close()
 
       print('Log-prob by layer.')
@@ -241,7 +282,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
            li, log_prob_layer[li].mean(), log_prob_layer[li].std(), log_prob_layer[li].max(), log_prob_layer[li].min()))
       print()
       plt.plot([each.mean() for each in log_prob_layer])
-      plt.savefig('{}/images/RBIG_LogProbbyLayer_{}_{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, n_run))
+      plt.savefig('{}/images/RBIG_LogProbbyLayer_{}_{}.png'.format(out_dir, args.dataset, args.rotation_type))
       plt.close()
 
       if FAIL_FLAG:
@@ -254,7 +295,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
         start = time()
       if args.dataset in ['FashionMNIST', 'MNIST']:
         sampling(rotation_matrices, data_anchors, bandwidths,
-                 image_name='{}/images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, args.n_layer, n_run),
+                 image_name='{}/images/RBIG_samples_{}_{}_layer{}.png'.format(out_dir, args.dataset, args.rotation_type, args.n_layer),
                  channel=channel, image_size=image_size, process_size=10)
       else:
         if data_anchors[0].shape[1] > 2:
@@ -276,7 +317,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
             plt.hist2d(img2d[:,0], img2d[:,1], bins=[100,100])
             plt.xlim([-2.5, 2.5])
             plt.ylim([-2.5, 2.5])
-            plt.savefig('{}/images/RBIG_transformed_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, li, n_run))
+            plt.savefig('{}/images/RBIG_transformed_{}_{}_layer{}.png'.format(out_dir, args.dataset, args.rotation_type, li))
             plt.close()
           else:
             for pi,proj_mtrx in enumerate(proj_mtrxs):
@@ -284,11 +325,11 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
               plt.hist2d(img2d[:,0], img2d[:,1], bins=[100,100])
               plt.xlim([-2.5, 2.5])
               plt.ylim([-2.5, 2.5])
-              plt.savefig('{}/images/RBIG_transformed_{}_{}_layer{}_run{}_proj{}.png'.format(out_dir, args.dataset, args.rotation_type, li, n_run, pi))
+              plt.savefig('{}/images/RBIG_transformed_{}_{}_layer{}_proj{}.png'.format(out_dir, args.dataset, args.rotation_type, li, pi))
               plt.close()
         if False: # TODO: remove this
           sampling(rotation_matrices, data_anchors.copy(), bandwidths.copy(),
-                   image_name='{}/images/RBIG_samples_{}_{}_layer{}_run{}.png'.format(out_dir, args.dataset, args.rotation_type, args.n_layer, n_run),
+                   image_name='{}/images/RBIG_samples_{}_{}_layer{}.png'.format(out_dir, args.dataset, args.rotation_type, args.n_layer),
                    d=data.shape[1], sample_num=10000, process_size=100)
       if TIME:
         times['sampling'] += time() - start,
@@ -296,7 +337,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, n_run=0, out_di
       if len(rotation_matrices) > 0:
         rotation_matrices = torch.stack(rotation_matrices, 0)
         rotation_matrices = rotation_matrices.detach().cpu().numpy()
-        fname = os.path.join(out_dir, 'rotMtrx_{}_layer{}_run{}.npy'.format(args.rotation_type, args.n_layer, n_run))
+        fname = os.path.join(out_dir, 'rotMtrx_{}_layer{}.npy'.format(args.rotation_type, args.n_layer))
         np.save(fname, rotation_matrices)
 
       if TIME:
@@ -347,34 +388,15 @@ if __name__ == '__main__':
     DATA = dequantization(DATA, lambd)
     DATA = DATA.view(DATA.shape[0], -1)
 
-  n_runs = 1
-  losses = []
-  for i in range(n_runs):
-    if not SILENT:
-      print(i)
-    set_seed()
-    out_dir = os.path.join('outputs/', 'RBIG', args.dataset)
-    out_dir = os.path.join(out_dir, '{}_L{}_bt{}{}'.format(args.rotation_type, args.n_layer, args.bt, args.save_suffix))
-    if os.path.exists(out_dir):
-      print('Dir exist:', out_dir)
-      proceed = input("Do you want to proceed? (y/N)")
-      if 'y' not in proceed:
-        print('Exiting. Bye!')
-        exit(0)
-    print("out_dir:", out_dir)
-    os.makedirs(out_dir, exist_ok=True)
-    os.makedirs(os.path.join(out_dir, 'images'), exist_ok=True)
-    loss, _ = main(DATA, lambd, train_loader, val_loader, n_run=i, out_dir=out_dir)
-    if loss is not None:
-      losses += loss.item(),
-  best_60 = sorted(losses)[:60]
-  losses = np.array(best_60)
+  set_seed()
+  loss, _ = main(DATA, lambd, train_loader, val_loader, out_dir=out_dir)
+
   print('\nType:', args.rotation_type)
   print('n_layer={}'.format(args.n_layer))
-  print('Loss: mean={} / std={}'.format(losses.mean(), losses.std()))
-
-  means += losses.mean(),
-  stds += losses.std(),
+  print('loss:', loss)
+  # print('Loss: mean={} / std={}'.format(losses.mean(), losses.std()))
+  # means += losses.mean(),
+  # stds += losses.std(),
 
   # means = np.array(means)
   # stds = np.array(stds)
