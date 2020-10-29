@@ -314,7 +314,7 @@ def check_cov(X):
   print('  ss: max={} / min={} / mean={} / std={}'.format(
     ss.max(), ss.min(), ss.mean(), ss.std()))
   diff_from_I = torch.norm(torch.eye(D).to(device) - cov).item()
-  print('  diff from I: {}'.format())
+  print('  diff from I: {}'.format(diff_from_I))
   return diff_from_I, ss[0], ss[-1], ss.mean()
 
 
