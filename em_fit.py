@@ -14,7 +14,6 @@ from data.get_loader import *
 import pdb
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--lib', type=str, default='torch', choices=['np', 'torch'])
 parser.add_argument('--K', type=int, default=10)
 parser.add_argument('--n-pts', type=int, default=0)
 parser.add_argument('--gamma', type=float, default=0.1)
@@ -31,7 +30,8 @@ parser.add_argument('--data', type=str, default='GM', choices=[
        # disconnected
        'GM', 'GM_scale1', 'GM_scale2', 'GMn2', 'concentric',
        # UCI
-       'gas16_co', 'gas16_methane', 'gas8_co', 'gas8_co_normed', 'miniboone',
+       'gas16_co', 'gas16_methane', 'gas8_co', 'gas8_co_normed',
+       'miniboone', 'hepmass',
        # images,
        'MNIST',
        ])
@@ -43,10 +43,7 @@ parser.add_argument('--time', type=int, default=0)
 parser.add_argument('--check-obj', type=int, default=0)
 args = parser.parse_args()
 
-if args.lib == 'np':
-  from em_utils_np import *
-elif args.lib == 'torch':
-  from em_utils_torch import *
+from utils.em_utils_torch import *
 
 ga_token = ''
 if args.mode not in ['ICA', 'random']:
@@ -89,9 +86,8 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   fimg = os.path.join(args.save_dir, fimg)
   plot_hist(x, fimg)
 
-  if args.lib == 'torch':
-    X = to_tensor(X)
-    Xtest = to_tensor(Xtest)
+  X = to_tensor(X)
+  Xtest = to_tensor(Xtest)
 
   A_mode = args.mode
   D = X.shape[1]
@@ -217,16 +213,10 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       if SAVE_NPY:
         if TIME:
           save_start = time()
-        if args.lib == 'torch':
-          np.save(os.path.join(args.save_dir, 'model', 'A_i{}.npy'.format(i)), A.cpu().numpy())
-          np.save(os.path.join(args.save_dir, 'model', 'pi_i{}.npy'.format(i)), pi.cpu().numpy())
-          np.save(os.path.join(args.save_dir, 'model', 'mu_i{}.npy'.format(i)), mu.cpu().numpy())
-          np.save(os.path.join(args.save_dir, 'model', 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr.cpu().numpy())
-        else:
-          np.save(os.path.join(args.save_dir, 'model', 'A_i{}.npy'.format(i)), A)
-          np.save(os.path.join(args.save_dir, 'model', 'pi_i{}.npy'.format(i)), pi)
-          np.save(os.path.join(args.save_dir, 'model', 'mu_i{}.npy'.format(i)), mu)
-          np.save(os.path.join(args.save_dir, 'model', 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr)
+        np.save(os.path.join(args.save_dir, 'model', 'A_i{}.npy'.format(i)), A.cpu().numpy())
+        np.save(os.path.join(args.save_dir, 'model', 'pi_i{}.npy'.format(i)), pi.cpu().numpy())
+        np.save(os.path.join(args.save_dir, 'model', 'mu_i{}.npy'.format(i)), mu.cpu().numpy())
+        np.save(os.path.join(args.save_dir, 'model', 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr.cpu().numpy())
         if TIME:
           avg_time['save'] += time() - save_start,
         np.save(os.path.join(args.save_dir, 'KLs.npy'), np.array(KLs))
@@ -337,6 +327,9 @@ if __name__ == '__main__':
   elif data_token == 'miniboone':
     fdata = 'miniboone/train_normed.npy'
     fdata_val = 'miniboone/val_normed.npy'
+  elif data_token == 'hepmass':
+    fdata = 'hepmass/train_normed.npy'
+    fdata_val = 'hepmass/val_normed.npy'
   elif data_token == 'MNIST':
     mnist_dir = 'mnist/MNIST/processed'
     fdata = os.path.join(mnist_dir, 'train_normed_pca{}.npy'.format(args.pca_dim))

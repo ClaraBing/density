@@ -303,6 +303,11 @@ def check_cov(X):
   print('  diff from I: {:.4e}'.format(diff_from_I))
   return diff_from_I, ss[0], ss[-1], ss.mean()
 
+def get_aranges(low, up, n_steps):
+  if low == up:
+    return np.array([low] * n_steps)
+  return np.arange(low, up, (up-low)/n_steps)[::-1]
+
 def plot_hist(data, fimg):
   if type(data) is torch.Tensor:
     data = data.cpu().numpy()
