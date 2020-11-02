@@ -32,7 +32,7 @@ class BaseArgs:
                              help="RBIG: whether to calc the per-dim Gaussianized data with a thresholded CDF.")
     # Data
     self.parser.add_argument('--dataset', type=str, choices=['cifar10', 'MNIST', 'FashionMNIST',
-                             'GAS8', 'GAS16', 'GAS128', 'miniboone',
+                             'GAS8', 'GAS16', 'GAS128', 'miniboone', 'MNISTtab', 'hepmass',
                              'GaussianLine', 'GaussianMixture', 'uniform'])
     self.parser.add_argument('--num-workers', type=int, default=4)
     self.parser.add_argument('--bt', default=64, type=int, help='Batch size')

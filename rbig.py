@@ -4,6 +4,7 @@ import math
 import numpy as np
 import torch.nn.functional as F
 import torch.distributions as tdist
+import sys, traceback, code
 
 # local imports
 from utils.rbig_util import *
@@ -347,62 +348,72 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
       return val_loss / total, test_bpd / total
 
 if __name__ == '__main__':
-  total_datapoints = args.bt # 10000
-  process_size = 100
-  n_layer = args.n_layer
-  if not SILENT:
-    print("Total layer {}".format(n_layer))
+  try:
+    total_datapoints = args.bt # 10000
+    process_size = 100
+    n_layer = args.n_layer
+    if not SILENT:
+      print("Total layer {}".format(n_layer))
 
-  if args.dataset == 'MNIST':
-    lambd = 1e-5
-  elif args.dataset == 'FashionMNIST':
-    lambd = 1e-6
-  else:
-    lambd = 1e-5
+    if args.dataset == 'MNIST':
+      lambd = 1e-5
+    elif args.dataset == 'FashionMNIST':
+      lambd = 1e-6
+    else:
+      lambd = 1e-5
 
-  if not SILENT:
-    print("Loading dataset {}".format(args.dataset))
-  normal_distribution = tdist.Normal(0, 1)
+    if not SILENT:
+      print("Loading dataset {}".format(args.dataset))
+    normal_distribution = tdist.Normal(0, 1)
 
-  means, stds = [], []
-  # n_layers = list(range(20))
-  # n_layers = range(10)
+    means, stds = [], []
+    # n_layers = list(range(20))
+    # n_layers = range(10)
 
-  args.bt = total_datapoints
-  train_loader, val_loader = get_loader(args, is_train=True)
-  # args.bt = process_size
-  # val_loader = get_loader(args, is_train=False)
-  if not SILENT:
-    print('Val_loader: #', len(val_loader))
+    args.bt = total_datapoints
+    train_loader, val_loader = get_loader(args, is_train=True)
+    # args.bt = process_size
+    # val_loader = get_loader(args, is_train=False)
+    if not SILENT:
+      print('Val_loader: #', len(val_loader))
 
-  train_iter = iter(train_loader)
-  if type(train_iter) is tuple:
-    train_iter = train_iter[0]
-  DATA = next(train_iter)
-  if type(DATA) is list or type(DATA) is tuple:
-    DATA = DATA[0]
-  DATA = DATA.to(device)
-  if DATA.ndim == 4: # images
-    channel = DATA.shape[1]
-    image_size = DATA.shape[-1]
-    DATA = dequantization(DATA, lambd)
-    DATA = DATA.view(DATA.shape[0], -1)
+    train_iter = iter(train_loader)
+    if type(train_iter) is tuple:
+      train_iter = train_iter[0]
+    DATA = next(train_iter)
+    if type(DATA) is list or type(DATA) is tuple:
+      DATA = DATA[0]
+    DATA = DATA.to(device)
+    if DATA.ndim == 4: # images
+      channel = DATA.shape[1]
+      image_size = DATA.shape[-1]
+      DATA = dequantization(DATA, lambd)
+      DATA = DATA.view(DATA.shape[0], -1)
 
-  set_seed()
-  loss, _ = main(DATA, lambd, train_loader, val_loader, out_dir=out_dir)
+    set_seed()
+    loss, _ = main(DATA, lambd, train_loader, val_loader, out_dir=out_dir)
 
-  print('\nType:', args.rotation_type)
-  print('n_layer={}'.format(args.n_layer))
-  print('loss:', loss)
-  # print('Loss: mean={} / std={}'.format(losses.mean(), losses.std()))
-  # means += losses.mean(),
-  # stds += losses.std(),
+    print('\nType:', args.rotation_type)
+    print('n_layer={}'.format(args.n_layer))
+    print('loss:', loss)
+    # print('Loss: mean={} / std={}'.format(losses.mean(), losses.std()))
+    # means += losses.mean(),
+    # stds += losses.std(),
 
-  # means = np.array(means)
-  # stds = np.array(stds)
-  # means = np.minimum(means, means.min()*3)
-  # stds = np.minimum(stds, stds.min()*10)
-  # plt.errorbar(n_layers, means, stds, marker='^')
-  # plt.savefig('plt_{}_layer{}_runs{}.png'.format(args.rotation_type, max(n_layers), n_runs))
+    # means = np.array(means)
+    # stds = np.array(stds)
+    # means = np.minimum(means, means.min()*3)
+    # stds = np.minimum(stds, stds.min()*10)
+    # plt.errorbar(n_layers, means, stds, marker='^')
+    # plt.savefig('plt_{}_layer{}_runs{}.png'.format(args.rotation_type, max(n_layers), n_runs))
 
+  except Exception as e:
+    print(e)
+    typ, vacl, tb = sys.exc_info()
+    traceback.print_exc()
+    last_frame = lambda tb=tb: last_frame(tb.tb_next) if tb.tb_next else tb
+    frame = last_frame().tb_frame
+    ns = dict(frame.f_globals)
+    ns.update(frame.f_locals)
+    code.interact(local=ns)
 
