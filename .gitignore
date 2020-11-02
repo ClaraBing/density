@@ -3,3 +3,8 @@ datasets
 __pycache__
 */__pycache__
 args/__pycache__
+wandb/
+figs/
+images/
+outputs/
+runs_gaussianization/
