@@ -97,6 +97,11 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
     if not SUCC_FLAG:
       print('ICA failed. Use random orthonormal matrix.')
       A = to_tensor(ortho_group.rvs(D))
+  elif A_mode == 'variational':
+    raise NotImplementedError("variational")
+  elif A_mode == 'Wasserstein':
+    raise NotImplementedError("Wasserstein")
+    
 
   while (not END(dA, dsigma_sqr)) and niters < max_em_steps:
     niters += 1

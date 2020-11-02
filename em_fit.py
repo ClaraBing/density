@@ -21,7 +21,8 @@ parser.add_argument('--gamma-min', type=float, default=0.001)
 parser.add_argument('--n-steps', type=int, default=50)
 parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
-parser.add_argument('--mode', type=str, default='GA', choices=['GA', 'torchGA', 'torchAll', 'CF', 'ICA', 'random', 'None'])
+parser.add_argument('--mode', type=str, default='GA',
+                    choices=['ICA', 'random', 'None', 'variational', 'Wasserstein'])
 parser.add_argument('--grad-mode', type=str, default='GA', choices=['GA', 'CF1', 'CF2', 'BTLS', 'perturb'],
                     help="Ways to update A in EM iterates.")
 parser.add_argument('--data', type=str, default='GM', choices=[
