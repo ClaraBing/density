@@ -75,7 +75,8 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
     cov = X.T.matmul(X) / len(X)
     cnt = 0
     n_tries = 20
-    while cnt < n_tries:
+    SUCC_FLAG = False
+    while cnt < n_tries and not SUCC_FLAG:
       try:
         ica = FastICA()
         _ = ica.fit_transform(X.cpu())
@@ -90,11 +91,11 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
         A = np.linalg.inv(Aorig)
         _, ss, _ = np.linalg.svd(A)
         A = to_tensor(A / ss[0])
-        cnt = 2*n_tries
+        SUCC_FLAG = True
       except:
         cnt += 1
-    if cnt != 2*n_tries:
-      print('ICA failed. Use random.')
+    if not SUCC_FLAG:
+      print('ICA failed. Use random orthonormal matrix.')
       A = to_tensor(ortho_group.rvs(D))
 
   while (not END(dA, dsigma_sqr)) and niters < max_em_steps:
@@ -108,7 +109,7 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
 
     # M-step
     if A_mode == 'ICA' or A_mode == 'None':
-      pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
+      pi, mu, sigma_sqr = M(X, A, w, w_sumN, w_sumNK)
       obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
       objs[-1] += obj,
 
@@ -143,7 +144,7 @@ def E(X, A, pi, mu, sigma_sqr, Y=None):
   w_sumNK[w_sumNK < SMALL] = SMALL
   return Y, w, w_sumN, w_sumNK
 
-def update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=None):
+def M(X, A, w, w_sumN, w_sumNK, Y=None):
   N, D = X.shape
   if Y is None:
     Y = A.matmul(X.T) # D x N
