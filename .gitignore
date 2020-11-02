@@ -1,4 +1,5 @@
 scripts/
+datasets/
 __pycache__
 *__/__pycache__
 args/__pycache__
