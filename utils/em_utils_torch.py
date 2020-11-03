@@ -71,6 +71,9 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
   if A_mode == 'random':
     A = ortho_group.rvs(D)
     A = to_tensor(A)
+  elif A_mode == 'PCA':
+    cov = X.T.matmul(X) / len(X)
+    _, _, A = torch.svd(cov)
   elif A_mode == 'ICA':
     cov = X.T.matmul(X) / len(X)
     cnt = 0
@@ -113,7 +116,7 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
     if TIME: ret_time['E'] += time() - e_start,
 
     # M-step
-    if A_mode == 'ICA' or A_mode == 'None':
+    if A_mode == 'ICA' or A_mode == 'PCA' or A_mode == 'None':
       pi, mu, sigma_sqr = M(X, A, w, w_sumN, w_sumNK)
       obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
       objs[-1] += obj,

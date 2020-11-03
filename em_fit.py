@@ -22,7 +22,7 @@ parser.add_argument('--n-steps', type=int, default=50)
 parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
 parser.add_argument('--mode', type=str, default='GA',
-                    choices=['ICA', 'random', 'None', 'variational', 'Wasserstein'])
+                    choices=['ICA', 'PCA', 'random', 'None', 'variational', 'Wasserstein'])
 parser.add_argument('--grad-mode', type=str, default='GA', choices=['GA', 'CF1', 'CF2', 'BTLS', 'perturb'],
                     help="Ways to update A in EM iterates.")
 parser.add_argument('--data', type=str, default='GM', choices=[
@@ -47,7 +47,7 @@ args = parser.parse_args()
 from utils.em_utils_torch import *
 
 ga_token = ''
-if args.mode not in ['ICA', 'random']:
+if args.mode not in ['ICA', 'PCA', 'random']:
   ga_token = '_'+args.grad_mode
 if args.grad_mode == 'GA':
   ga_token += '_gamma{}_gammaMin{}'.format(args.gamma, args.gamma_min)
@@ -333,13 +333,21 @@ if __name__ == '__main__':
     fdata_val = 'hepmass/val_normed.npy'
   elif data_token == 'MNIST':
     mnist_dir = 'mnist/MNIST/processed'
-    fdata = os.path.join(mnist_dir, 'train_normed_pca{}.npy'.format(args.pca_dim))
-    fdata_val = os.path.join(mnist_dir, 'test_normed_pca{}.npy'.format(args.pca_dim))
+    if args.pca_dim:
+      fdata = os.path.join(mnist_dir, 'train_normed_pca{}.npy'.format(args.pca_dim))
+      fdata_val = os.path.join(mnist_dir, 'test_normed_pca{}.npy'.format(args.pca_dim))
+    else:
+      fdata = os.path.join(mnist_dir, 'train_normed.npy')
+      fdata_val = os.path.join(mnist_dir, 'test_normed.npy')
   
   data_token += args.save_token
 
   X = np.load(os.path.join(data_dir, fdata))
   Xtest = np.load(os.path.join(data_dir, fdata_val))
+  # zero-centered
+  X = X - X.mean(0)
+  Xtest = Xtest - X.mean(0)
+
   if X.ndim > 2: # images
     X = X.reshape(len(X), -1)
     Xtest = Xtest.reshape(len(Xtest), -1)
