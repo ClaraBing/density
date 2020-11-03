@@ -41,7 +41,9 @@ class BaseArgs:
                              help='Dataset length. Used for synthetic dataset e.g. GaussianLine.')
     self.parser.add_argument('--d', type=int, default=16,
                              help="Data dimension. Used by GaussianLine")
-    self.parser.add_argument('--fxdir', type=str, default='',
+    self.parser.add_argument('--pca-dim', type=int, default=300,
+                             help="PCA dimension; currently for MNIST (tabular).")
+    self.parser.add_argument('--fdir', type=str, default='',
                              help="File path to a pre-stored direction; used for GaussianLine.")
     self.parser.add_argument('--fdata', type=str, help="Path to data file.")
     self.parser.add_argument('--norm-by-col', type=int, default=0,
