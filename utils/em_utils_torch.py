@@ -273,7 +273,7 @@ def compute_log_det(Y, X, pi, mu, sigma_sqr, A,
   log_pdfs = - 0.5 * scaled**2 + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr)
   log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
 
-  t2 = (X**2).sum() / N + 0.5*np.log(2*np.pi)
+  # t2 = (X**2).sum() / N + 0.5*np.log(2*np.pi)
 
   log_gaussian_derivative_good = dists.Normal(0, 1).log_prob(X) * cdf_mask
   cdf_l_bad_right_log = log_sf_l * cdf_mask_right + (-1.) * (1. - cdf_mask_right)
@@ -286,7 +286,10 @@ def compute_log_det(Y, X, pi, mu, sigma_sqr, A,
 
   lgd_sum = log_gaussian_derivative.sum() / N
 
-  log_det = (log_pdf - log_gaussian_derivative).sum() / N + torch.log(torch.abs(torch.det(A)))
+  log_det_A = torch.log(torch.abs(torch.det(A)))
+  log_det_distri = (log_pdf - log_gaussian_derivative).sum() / N
+  log_det = log_det_distri
+  # + log_det_A
   return log_det
 
 def eval_KL(X, log_det):
