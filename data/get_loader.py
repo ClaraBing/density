@@ -42,7 +42,7 @@ def get_loader(args, is_train):
     dset = MINIBooNE()
   elif dataset == 'MNISTtab':
    # treat mnist as tabular data
-   dset = MNISTtab()
+   dset = MNISTtab(args.pca_dim)
   elif dataset == 'MNIST':
     channel = 1
     image_size = 28
