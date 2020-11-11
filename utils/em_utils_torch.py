@@ -71,11 +71,15 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
   if A_mode == 'random':
     A = ortho_group.rvs(D)
     A = to_tensor(A)
+  elif A_mode == 'PCA':
+    cov = X.T.matmul(X) / len(X)
+    _, _, A = torch.svd(cov)
   elif A_mode == 'ICA':
     cov = X.T.matmul(X) / len(X)
     cnt = 0
     n_tries = 20
-    while cnt < n_tries:
+    SUCC_FLAG = False
+    while cnt < n_tries and not SUCC_FLAG:
       try:
         ica = FastICA()
         _ = ica.fit_transform(X.cpu())
@@ -90,12 +94,17 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
         A = np.linalg.inv(Aorig)
         _, ss, _ = np.linalg.svd(A)
         A = to_tensor(A / ss[0])
-        cnt = 2*n_tries
+        SUCC_FLAG = True
       except:
         cnt += 1
-    if cnt != 2*n_tries:
-      print('ICA failed. Use random.')
+    if not SUCC_FLAG:
+      print('ICA failed. Use random orthonormal matrix.')
       A = to_tensor(ortho_group.rvs(D))
+  elif A_mode == 'variational':
+    raise NotImplementedError("variational")
+  elif A_mode == 'Wasserstein':
+    raise NotImplementedError("Wasserstein")
+    
 
   while (not END(dA, dsigma_sqr)) and niters < max_em_steps:
     niters += 1
@@ -107,8 +116,8 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
     if TIME: ret_time['E'] += time() - e_start,
 
     # M-step
-    if A_mode == 'ICA' or A_mode == 'None':
-      pi, mu, sigma_sqr = update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK)
+    if A_mode == 'ICA' or A_mode == 'PCA' or A_mode == 'None':
+      pi, mu, sigma_sqr = M(X, A, w, w_sumN, w_sumNK)
       obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
       objs[-1] += obj,
 
@@ -143,7 +152,7 @@ def E(X, A, pi, mu, sigma_sqr, Y=None):
   w_sumNK[w_sumNK < SMALL] = SMALL
   return Y, w, w_sumN, w_sumNK
 
-def update_pi_mu_sigma(X, A, w, w_sumN, w_sumNK, Y=None):
+def M(X, A, w, w_sumN, w_sumNK, Y=None):
   N, D = X.shape
   if Y is None:
     Y = A.matmul(X.T) # D x N
@@ -264,7 +273,7 @@ def compute_log_det(Y, X, pi, mu, sigma_sqr, A,
   log_pdfs = - 0.5 * scaled**2 + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr)
   log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
 
-  t2 = (X**2).sum() / N + 0.5*np.log(2*np.pi)
+  # t2 = (X**2).sum() / N + 0.5*np.log(2*np.pi)
 
   log_gaussian_derivative_good = dists.Normal(0, 1).log_prob(X) * cdf_mask
   cdf_l_bad_right_log = log_sf_l * cdf_mask_right + (-1.) * (1. - cdf_mask_right)
@@ -277,7 +286,10 @@ def compute_log_det(Y, X, pi, mu, sigma_sqr, A,
 
   lgd_sum = log_gaussian_derivative.sum() / N
 
-  log_det = (log_pdf - log_gaussian_derivative).sum() / N + torch.log(torch.abs(torch.det(A)))
+  log_det_A = torch.log(torch.abs(torch.det(A)))
+  log_det_distri = (log_pdf - log_gaussian_derivative).sum() / N
+  log_det = log_det_distri
+  # + log_det_A
   return log_det
 
 def eval_KL(X, log_det):

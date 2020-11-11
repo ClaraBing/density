@@ -304,9 +304,15 @@ def dequantization(data, lambd):
 
 def check_cov(X):
   N, D = X.shape
+  if N == 0:
+    return 0, 0, 0, 0
   cov = X.T.matmul(X) / N
   diag = torch.diag(cov).cpu().numpy()
-  _, ss, _ = torch.svd(cov)
+  try:
+    _, ss, _ = torch.svd(cov)
+  except Exception as e:
+    print(e)
+    pdb.set_trace()
   ss = ss.cpu().numpy()
   print('check cov:')
   print('  diag: max={} / min={} / mean={} / std={}'.format(

@@ -2,9 +2,12 @@ import os
 import torch
 import math
 import numpy as np
+from sklearn.decomposition import FastICA
 import torchvision
 import torch.nn.functional as F
 import torch.distributions as tdist
+
+import pdb
 
 # set random seed
 torch.manual_seed(1234)
@@ -15,6 +18,7 @@ if torch.cuda.is_available():
     torch.backends.cudnn.benchmark = False
 
 device = 'cuda'
+
 normal_distribution = tdist.Normal(0, 1)
 
 
@@ -64,9 +68,13 @@ def logistic_kernel_log_pdf(x, datapoint, h):
 
 def logistic_kernel_cdf(x, datapoint, h):
     n = datapoint.shape[0]
-    log_cdfs = - F.softplus(-(x[None, ...] - datapoint[:, None, :]) / h[None, ...]) - np.log(n)
-    log_cdf = torch.logsumexp(log_cdfs, dim=0)
-    cdf = torch.exp(log_cdf)
+    try:
+      log_cdfs = - F.softplus(-(x[None, ...] - datapoint[:, None, :]) / h[None, ...]) - np.log(n)
+      log_cdf = torch.logsumexp(log_cdfs, dim=0)
+      cdf = torch.exp(log_cdf).float()
+    except Exception as e:
+      print(e)
+      pdb.set_trace()
     return cdf
 
 
@@ -91,7 +99,7 @@ def compute_log_det(x, gaussianalized_x, datapoints, cdf_mask, log_cdf_l, cdf_ma
     n = datapoints.shape[0]
     log_pdfs = -(x[None, ...] - datapoints[:, None, :]) / h[None, ...] - torch.log(h[None, ...]) - \
                2 * F.softplus(-(x[None, ...] - datapoints[:, None, :]) / h[None, ...]) - np.log(n)
-    log_pdf = torch.logsumexp(log_pdfs, dim=0)
+    log_pdf = torch.logsumexp(log_pdfs, dim=0).float()
 
     log_gaussian_derivative_good = tdist.Normal(0, 1).log_prob(gaussianalized_x) * cdf_mask
     cdf_l_bad_right_log = log_sf_l * cdf_mask_right + (-1.) * (1. - cdf_mask_right)
@@ -120,6 +128,8 @@ def logistic_inverse_normal_cdf(x, bandwidth, datapoints):
     cdf_l = logistic_kernel_cdf(x, datapoints, h=bandwidth)
     log_cdf_l = logistic_kernel_log_cdf(x, datapoints, h=bandwidth)  # log(CDF)
     log_sf_l = logistic_kernel_log_sf(x, datapoints, h=bandwidth)  # log(1-CDF)
+    # TODO: should I convert everything to Float?
+    log_cdf_l, log_sf_l = log_cdf_l.float(), log_sf_l.float()
 
     # Approximate Gaussian CDF
     # inv(CDF) ~ np.sqrt(-2 * np.log(1-x)) #right, x -> 1
@@ -149,8 +159,8 @@ def invert_bisection_combo(x, rotation_matrix, datapoints, bandwidth, verbose=Fa
     z = torch.mm(x, rotation_matrix.permute(1, 0))
     iteration = int(np.log2(upper - lower) + np.log2(1e6))
 
-    upper = torch.tensor(upper).repeat(*z.shape).to(device)
-    lower = torch.tensor(lower).repeat(*z.shape).to(device)
+    upper = torch.tensor(upper).float().repeat(*z.shape).to(device)
+    lower = torch.tensor(lower).float().repeat(*z.shape).to(device)
     for i in range(iteration):
         mid = (upper + lower) / 2.
         inverse_mid, _, _, _ = logistic_inverse_normal_cdf(mid, bandwidth, datapoints)
@@ -167,9 +177,12 @@ def invert_bisection_combo(x, rotation_matrix, datapoints, bandwidth, verbose=Fa
 
 
 def sampling(rotation_matrices, data_anchors, bandwidths, image_name='RBIG_samples.png',
-             sample_num=100, channel=1, image_size=28, process_size=10):
+             sample_num=100, d=None, channel=None, image_size=28, process_size=10):
     print("Start sampling")
-    x = torch.randn(sample_num, channel * image_size * image_size).to(device)
+    if d is not None:
+      x = torch.randn(sample_num, d).float().to(device)
+    elif channel is not None:
+      x = torch.randn(sample_num, channel * image_size * image_size).float().to(device)
     for i in range(sample_num // process_size):
         for l in range(len(rotation_matrices) - 1, -1, -1):
             print("Sampling layer {}".format(l))
@@ -179,23 +192,51 @@ def sampling(rotation_matrices, data_anchors, bandwidths, image_name='RBIG_sampl
 
         x[i * process_size: (i + 1) * process_size, :] = sigmoid_transform(
             x[i * process_size: (i + 1) * process_size, :])
-    x = x.reshape(sample_num, channel, image_size, image_size)
+    if d is not None:
+      x = x.reshape(sample_num, d)
+    elif channel is not None:
+      x = x.reshape(sample_num, channel, image_size, image_size)
     images_concat = torchvision.utils.make_grid(x, nrow=int(sample_num ** 0.5), padding=2, pad_value=255)
     torchvision.utils.save_image(images_concat, image_name)
 
-
-def generate_orthogonal_matrix(data_anchor, type="PCA", verbose=False):
+def generate_orthogonal_matrix(data_anchor, rot_type="PCA", verbose=False):
     if verbose:
-        print("Generating {} matrix.".format(type))
-    if type == "random":
-        # Random orthogonal matrix
-        random_mat = torch.randn(data_anchor.shape[-1], data_anchor.shape[-1])
-        rotation_matrix, _ = torch.qr(random_mat)
-    elif type == "PCA":
-        # PCA
-        rotation_matrix, _, _ = torch.svd(
-            torch.mm(data_anchor.permute(1, 0), data_anchor))
-
+      print("Generating {} matrix.".format(type))
+    if rot_type == "random":
+      # Random orthogonal matrix
+      random_mat = torch.randn(data_anchor.shape[-1], data_anchor.shape[-1])
+      rotation_matrix, _ = torch.qr(random_mat)
+    elif rot_type == "PCA":
+      # PCA
+      rotation_matrix, _, _ = torch.svd(
+          torch.mm(data_anchor.permute(1, 0), data_anchor))
+      rotation_matrix = rotation_matrix.float()
+    elif rot_type == 'ICA':
+      # NOTE: FastICA is extremely slow for high dim data and may not converge.
+      cov = torch.mm(data_anchor.permute(1, 0), data_anchor)
+      cnt = 0
+      n_tries = 20
+      while cnt < n_tries:
+        # multiple
+        try:
+          rotation_matrix = FastICA().fit_transform(cov.cpu())
+          cnt = 2*n_tries
+        except:
+          cnt += 1
+      if cnt != n_tries:
+        rotation_matrix = torch.tensor(rotation_matrix).float()
+      else:
+        rotation_matrix = None
     if verbose:
-        print("{} matrix generated!".format(type))
+      print("{} matrix generated!".format(type))
     return rotation_matrix
+
+def dequantization(data, lambd):
+  """
+  data: (batch of) images in range [0, 1]
+  """
+  data = data * 255. / 256.
+  data += torch.rand_like(data) / 256.
+  data = logit_transform(data, lambd)
+  return data
+
