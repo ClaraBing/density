@@ -32,7 +32,7 @@ parser.add_argument('--data', type=str, default='GM', choices=[
        'GM', 'GM_scale1', 'GM_scale2', 'GMn2', 'concentric',
        # UCI
        'gas16_co', 'gas16_methane', 'gas8_co', 'gas8_co_normed',
-       'miniboone', 'hepmass',
+       'miniboone', 'hepmass', 'gas', 'power',
        # images,
        'MNIST',
        ])
@@ -308,10 +308,10 @@ if __name__ == '__main__':
     # 2 circles w/ radius 0.5 and 2. Each with 10k points.
     fdata = 'EM/concentric.npy'
   elif data_token == 'gas16_co':
-    fdata = 'GAS/gas_d16_CO_normed_train400k.npy'
-    fdata_val = 'GAS/gas_d16_CO_normed_test.npy'
+    fdata = 'GAS/my_data/gas_d16_CO_normed_train400k.npy'
+    fdata_val = 'GAS/my_data/gas_d16_CO_normed_test.npy'
   elif data_token == 'gas16_methane':
-    fdata = 'GAS/gas_d16_methane.npy'
+    fdata = 'GAS/my_data/gas_d16_methane.npy'
   elif data_token == 'gas8_co':
     gas_dir = 'flows_data/gas'
     # train: 852174 points
@@ -339,6 +339,14 @@ if __name__ == '__main__':
     else:
       fdata = os.path.join(mnist_dir, 'train_normed.npy')
       fdata_val = os.path.join(mnist_dir, 'test_normed.npy')
+  elif data_token == 'power':
+    power_dir = 'POWER/'
+    fdata = os.path.join(power_dir, 'train_normed.npy')
+    fdata_val = os.path.join(power_dir, 'val_normed.npy')
+  elif data_token == 'gas':
+    gas_dir = 'GAS/'
+    fdata = os.path.join(gas_dir, 'ethylene_CO_train_normed.npy')
+    fdata_val = os.path.join(gas_dir, 'ethylene_CO_val_normed.npy')
   
   data_token += args.save_token
 
