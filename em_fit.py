@@ -160,12 +160,13 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
 
     if TIME:
       g1d_start = time()
+    prevX = X.clone()
     X, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right] = gaussianize_1d(Y, pi, mu, sigma_sqr)
     if TIME:
       avg_time['G1D'] += time() - g1d_start,
       kl_start = time()
     diff_from_I, sigma_max, sigma_min, sigma_mean = check_cov(X)
-    log_det += compute_log_det(Y, X, pi, mu, sigma_sqr, A, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right)
+    log_det += compute_log_det(X, Y, pi, mu, sigma_sqr, A, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right)
     kl = eval_KL(X, log_det)
     KLs += kl,
     print('KL:', kl)
@@ -181,6 +182,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     plot_hist(x, fimg)
 
     # check on test data
+    prevXtest = Xtest.clone()
     Xtest, cdf_mask_test, [log_cdf_test, cdf_mask_left_test], [log_sf_test, cdf_mask_right_test] = gaussianize_1d(Ytest, pi, mu, sigma_sqr)
     diff_from_I_test, sigma_max_test, sigma_min_test, sigma_mean_test = check_cov(Xtest)
     x = Xtest
@@ -190,7 +192,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       print('Xtest: NaN')
       pdb.set_trace()
     plot_hist(x, fimg)
-    log_det_test += compute_log_det(Ytest, Xtest, pi, mu, sigma_sqr, A, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test)
+    log_det_test += compute_log_det(Xtest, Ytest, pi, mu, sigma_sqr, A, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test)
     kl_test = eval_KL(Xtest, log_det_test)
     KLs_test += kl_test,
     print('KL (test):', kl_test)
@@ -207,7 +209,8 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         'sigma_max_test': sigma_max_test,
         'sigma_min_test': sigma_min_test,
         'sigma_mean': sigma_mean,
-        'sigma_mean_test': sigma_mean_test
+        'sigma_mean_test': sigma_mean_test,
+        'detA': torch.det(A).item(),
         })
 
     if args.save_dir:
