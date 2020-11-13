@@ -15,6 +15,7 @@ from time import time
 
 # local imports
 from data.dataset_mixture import GaussianMixture
+from utils.rbig_util import logistic_kernel_cdf, logistic_kernel_cdf, logistic_kernel_log_sf
 
 import pdb
 
@@ -30,9 +31,13 @@ SINGULAR_SMALL = 1e-2
 DTYPE = torch.DoubleTensor
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-def init_params(D, K, mu_low, mu_up):
+def init_A(D):
   # rotation matrix
   A = torch.eye(D)
+  A = A.type(DTYPE).to(device)
+  return A
+
+def init_GM_params(D, K, mu_low, mu_up):
   # prior - uniform
   pi = torch.ones([D, K]) / K
   # GM means
@@ -40,19 +45,16 @@ def init_params(D, K, mu_low, mu_up):
   # GM variances
   sigma_sqr = torch.ones([D, K])
   if VERBOSE:
-    print('A:', A.view(-1))
     print('mu: mean={} / std={}'.format(mu.mean(), mu.std()))
 
-  A = A.type(DTYPE).to(device)
   pi = pi.type(DTYPE).to(device)
   mu = mu.type(DTYPE).to(device)
   sigma_sqr = sigma_sqr.type(DTYPE).to(device)
 
-  return A, pi, mu, sigma_sqr
+  return pi, mu, sigma_sqr
 
-def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
-       A_mode='GA', grad_mode='GA',
-       max_em_steps=30, n_gd_steps=20):
+def update_EM(X, A, pi, mu, sigma_sqr,
+              threshold=5e-5, max_em_steps=30, n_gd_steps=20):
 
   if type(X) is not torch.Tensor:
     X = torch.tensor(X)
@@ -60,13 +62,39 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
 
   N, D = X.shape
 
-  END = lambda dA, dsigma_sqr: (dA + dsigma_sqr) < threshold
+  END = lambda dsigma_sqr: dsigma_sqr < threshold
 
   Y = None
   niters = 0
-  dA, dsigma_sqr = 10, 10
+  dsigma_sqr = 10,
   ret_time = {'E':[], 'obj':[]}
-  grad_norms, objs= [], []
+  grad_norms, objs= [], [] 
+
+  while (not END(dsigma_sqr)) and niters < max_em_steps:
+    niters += 1
+    A_prev, sigma_sqr_prev = A.clone(), sigma_sqr.clone()
+    objs += [],
+
+    if TIME: e_start = time()
+    Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr, Y=Y)
+    if TIME: ret_time['E'] += time() - e_start,
+
+    # M-step
+    pi, mu, sigma_sqr = M(X, A, w, w_sumN, w_sumNK)
+    obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+    objs[-1] += obj,
+
+  if VERBOSE:
+    print('#{}: dsigma_sqr={:.3e}'.format(niters, dsigma_sqr))
+
+  if TIME:
+    for key in ret_time:
+      ret_time[key] = np.array(ret_time[key]) if ret_time[key] else 0
+
+  return pi, mu, sigma_sqr, grad_norms, objs, ret_time 
+
+def update_A(A_mode, X):
+  N, D = X.shape
 
   if A_mode == 'random':
     A = ortho_group.rvs(D)
@@ -104,33 +132,8 @@ def update_EM(X, K, gamma, A, pi, mu, sigma_sqr, threshold=5e-5,
     raise NotImplementedError("variational")
   elif A_mode == 'Wasserstein':
     raise NotImplementedError("Wasserstein")
-    
-
-  while (not END(dA, dsigma_sqr)) and niters < max_em_steps:
-    niters += 1
-    A_prev, sigma_sqr_prev = A.clone(), sigma_sqr.clone()
-    objs += [],
-
-    if TIME: e_start = time()
-    Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr, Y=Y)
-    if TIME: ret_time['E'] += time() - e_start,
-
-    # M-step
-    if A_mode == 'ICA' or A_mode == 'PCA' or A_mode == 'None':
-      pi, mu, sigma_sqr = M(X, A, w, w_sumN, w_sumNK)
-      obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-      objs[-1] += obj,
-
-  if VERBOSE:
-    print('#{}: dA={:.3e} / dsigma_sqr={:.3e}'.format(niters, dA, dsigma_sqr))
-    print('A:', A.view(-1))
-
-  if TIME:
-    for key in ret_time:
-      ret_time[key] = np.array(ret_time[key]) if ret_time[key] else 0
-
-  return A, pi, mu, sigma_sqr, grad_norms, objs, ret_time 
-
+  return A
+ 
 # util funcs in EM steps
 def E(X, A, pi, mu, sigma_sqr, Y=None):
   N, D = X.shape
@@ -163,6 +166,15 @@ def M(X, A, w, w_sumN, w_sumNK, Y=None):
   mu[torch.abs(mu) < SMALL] = SMALL 
   sigma_sqr[sigma_sqr < SMALL] = SMALL
   return pi, mu, sigma_sqr
+
+# from RBIG code
+def generate_bandwidth(datapoints):
+    total_datapoints = datapoints.shape[0]
+    # scale ~ 0.13
+    scale = (4. * np.sqrt(math.pi) / ((math.pi ** 4) * total_datapoints)) ** (0.2)
+    bandwidth = torch.std(datapoints, dim=0, keepdim=True) * scale
+    return bandwidth
+
 
 def get_objetive(X, A, pi, mu, sigma_sqr, w, Y=None):
   N, D = X.shape
@@ -208,20 +220,26 @@ def get_grad(X, A, w, mu, sigma_sqr):
 normal_distribution = dists.Normal(0, 1)
 
 # compute inverse normal CDF
-def gaussianize_1d(X, pi, mu, sigma_sqr):
+def gaussianize_1d(X, pi, mu, sigma_sqr, datapoints=None, bandwidth=None):
   mask_bound = 5e-8
 
   N, D = X.shape
 
-  # for calculations please see: https://www.overleaf.com/6125358376rgmjjgdsmdmm
-  scaled = (X.unsqueeze(-1) - mu) / sigma_sqr**0.5
-  scaled = scaled.cpu()
-  normal_cdf = to_tensor(norm.cdf(scaled))
-  cdf = (pi * normal_cdf).sum(-1)
-  log_cdfs = to_tensor(norm.logcdf(scaled))
-  log_cdf = torch.logsumexp(torch.log(pi) + log_cdfs, dim=-1)
-  log_sfs = to_tensor(norm.logcdf(-1*scaled))
-  log_sf = torch.logsumexp(torch.log(pi) + log_sfs, dim=-1)
+  if bandwidth is None:
+    # for calculations please see: https://www.overleaf.com/6125358376rgmjjgdsmdmm
+    scaled = (X.unsqueeze(-1) - mu) / sigma_sqr**0.5
+    scaled = scaled.cpu()
+    normal_cdf = to_tensor(norm.cdf(scaled))
+    cdf = (pi * normal_cdf).sum(-1)
+    log_cdfs = to_tensor(norm.logcdf(scaled))
+    log_cdf = torch.logsumexp(torch.log(pi) + log_cdfs, dim=-1)
+    log_sfs = to_tensor(norm.logcdf(-1*scaled))
+    log_sf = torch.logsumexp(torch.log(pi) + log_sfs, dim=-1)
+  else:
+    mask_bound = 0.5e-7
+    cdf = logistic_kernel_cdf(x, datapoints, h=bandwidth)
+    log_cdf = logistic_kernel_log_cdf(x, datapoints, h=bandwidth)  # log(CDF)
+    log_sf = logistic_kernel_log_sf(x, datapoints, h=bandwidth)  # log(1-CDF)
 
   # Approximate Gaussian CDF
   # inv(CDF) ~ np.sqrt(-2 * np.log(1-x)) #right, x -> 1
@@ -265,15 +283,42 @@ def gaussianize_1d(X, pi, mu, sigma_sqr):
 
   return new_X, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right]
 
+def compute_log_det_v2(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right,
+                    pi=None, mu=None, sigma_sqr=None,
+                    datapoints=None, h=None):
+  # NOTE: currently debugging this function.
+  # Y should be rotated & before Gaussianization,
+  # X should be Gaussiznied.
+  N, D = Y.shape
 
-def compute_log_det(X, Y, pi, mu, sigma_sqr, A,
-                    cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right):
+  # dp / dy
+  if h is None:
+    scaled = (Y.unsqueeze(-1) - mu)**2 / sigma_sqr
+    log_pdfs = - 0.5 * scaled + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr**0.75)
+    log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
+  else:
+    Nd = datapoints.shape[0]
+    log_pdfs = -(Y[None, ...] - datapoints[:, None, :]) / h[None, ...] \
+               - torch.log(h[None, ...]) \
+               - 2 * F.softplus(-(x[None, ...] - datapoints[:, None, :]) / h[None, ...]) - np.log(Nd)
+    log_pdf = torch.logsumexp(log_pdfs, dim=0).double()
+    pdb.set_trace()
+
+  # d phi^{-1} / dp
+  p1 = 0.5 * np.log(2*np.pi) + 0.5 * X**2
+
+  log_det = (log_pdf + p1).sum() / N
+  return log_det
+
+def compute_log_det(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right,
+                    pi=None, mu=None, sigma_sqr=None,
+                    datapoints=None, h=None):
   # NOTE: currently debugging this function.
   # Y should be rotated & before Gaussianization,
   # X should be Gaussiznied.
   N, D = Y.shape
   scaled = (Y.unsqueeze(-1) - mu) / sigma_sqr**0.5
-  log_pdfs = - 0.5 * scaled**2 + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr)
+  log_pdfs = - 0.5 * scaled**2 + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr**0.75)
   log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
 
   # t2 = (X**2).sum() / N + 0.5*np.log(2*np.pi)
@@ -292,20 +337,22 @@ def compute_log_det(X, Y, pi, mu, sigma_sqr, A,
 
   lgd_sum = log_gaussian_derivative.sum() / N
 
-  log_det_A = torch.log(torch.abs(torch.det(A)))
   # pdb.set_trace()
   # tmp1 = log_pdf.sum() / N
   # tmp2 = log_gaussian_derivative.sum() / N
-  log_det_distri = (log_pdf - log_gaussian_derivative).sum() / N
-  log_det = log_det_distri
-  log_det += log_det_A
+  log_det = (log_pdf - log_gaussian_derivative).sum() / N
   return log_det
 
-def eval_KL(X, log_det):
+def eval_NLL(X, log_det):
   N, D = X.shape
   # term for std normal
   log_probs = - (X**2).sum() - 0.5*D *np.log(2*np.pi)
-  KL = - log_probs / N - log_det
+  NLL = - log_probs / N - log_det
+  return NLL.item()
+
+def eval_KL(X):
+  N, D = X.shape
+  KL = 0.5*(X**2).sum() / N + 0.5*D *np.log(2*np.pi)
   return KL.item()
 
 def check_cov(X):

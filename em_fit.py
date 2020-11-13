@@ -23,6 +23,8 @@ parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
 parser.add_argument('--mode', type=str, default='GA',
                     choices=['ICA', 'PCA', 'random', 'None', 'variational', 'Wasserstein'])
+parser.add_argument('--g1d-first', type=int, default=0,
+                    help="Whether to run a Gaussianization step before iterates. If 1, then this should be the same as RBIG.")
 parser.add_argument('--grad-mode', type=str, default='GA', choices=['GA', 'CF1', 'CF2', 'BTLS', 'perturb'],
                     help="Ways to update A in EM iterates.")
 parser.add_argument('--data', type=str, default='GM', choices=[
@@ -97,34 +99,43 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   gamma_low, gamma_up = args.gamma_min, args.gamma
   gammas = get_aranges(gamma_low, gamma_up, n_steps)
   threshs = get_aranges(1e-9, 1e-5, n_steps)
-  A, pi, mu, sigma_sqr = init_params(D, K, mu_low, mu_up)
+  A = init_A(D)
+  pi, mu, sigma_sqr = init_GM_params(D, K, mu_low, mu_up)
+  NLLs, NLLs_test = [], []
   KLs, KLs_test = [], []
 
   log_det, log_det_test = 0, 0
 
   # get initial metrics
   # train
-  kl = eval_KL(X, log_det)
-  KLs += kl,
-  print('Inital KL:', kl)
+  nll = eval_NLL(X, log_det)
+  NLLs += nll,
+  print('Inital NLL:', nll)
   # test
-  kl_test = eval_KL(X, log_det_test)
-  KLs_test += kl_test,
-  print('Inital KL (test):', kl_test)
+  nll_test = eval_NLL(X, log_det_test)
+  NLLs_test += nll_test,
+  print('Inital NLL (test):', nll_test)
   print()
+
+  if args.g1d_first:
+    X, _, _, _ = gaussianize_1d(X, pi=pi, mu=mu, sigma_sqr=sigma_sqr) 
+    Xtest, _, _, _ = gaussianize_1d(Xtest, pi=pi, mu=mu, sigma_sqr=sigma_sqr)
 
   grad_norms_total = []
   if TIME:
-    avg_time = {'EM':[], 'KL':[], 'G1D':[], 'save':[], 'iter':[]}
+    avg_time = {'EM':[], 'NLL':[], 'G1D':[], 'save':[], 'iter':[]}
     default_keys = list(avg_time.keys())
+  # Iterating over the layers
   for i in range(n_steps):
     iter_start = time()
     print('iteration {} - data={} - mode={}{}'.format(i, args.data, args.mode,
           '(grad {})'.format(args.grad_mode) if args.mode in ['GA', 'torchGA', 'torchAll'] else ''))
     if TIME:
       em_start = time()
-    A, pi, mu, sigma_sqr, grad_norms, objs, ret_time = update_EM(X, K, gammas[i], A, pi, mu, sigma_sqr, threshs[i],
-              A_mode=A_mode, grad_mode=args.grad_mode, max_em_steps=args.n_em, n_gd_steps=args.n_gd)
+    A = update_A(A_mode, X)
+    pi, mu, sigma_sqr, grad_norms, objs, ret_time = update_EM(X, A, pi, mu, sigma_sqr,
+              threshs[i], max_em_steps=args.n_em, n_gd_steps=args.n_gd)
+
     if TIME:
       for key in ret_time:
         if key not in avg_time: avg_time[key] = []
@@ -158,20 +169,23 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     fimg = os.path.join(args.save_dir, fimg)
     plot_hist(Ytest, fimg)
 
-    if TIME:
-      g1d_start = time()
+    if TIME: g1d_start = time()
     prevX = X.clone()
     X, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right] = gaussianize_1d(Y, pi, mu, sigma_sqr)
-    if TIME:
-      avg_time['G1D'] += time() - g1d_start,
-      kl_start = time()
-    diff_from_I, sigma_max, sigma_min, sigma_mean = check_cov(X)
-    log_det += compute_log_det(X, Y, pi, mu, sigma_sqr, A, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right)
-    kl = eval_KL(X, log_det)
+    if TIME: avg_time['G1D'] += time() - g1d_start,
+
+    if TIME: nll_start = time()
+    log_det += compute_log_det(X, Y, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right,
+                               pi=pi, mu=mu, sigma_sqr=sigma_sqr)
+    log_det += torch.log(torch.abs(torch.det(A)))
+    nll = eval_NLL(X, log_det)
+    NLLs += nll,
+    kl = eval_KL(X)
     KLs += kl,
-    print('KL:', kl)
-    if TIME:
-      avg_time['KL'] += time() - kl_start,
+    print('NLL+KL:', nll)
+    if TIME: avg_time['NLL'] += time() - nll_start,
+
+    diff_from_I, sigma_max, sigma_min, sigma_mean = check_cov(X)
 
     x = X
     fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
@@ -192,14 +206,20 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       print('Xtest: NaN')
       pdb.set_trace()
     plot_hist(x, fimg)
-    log_det_test += compute_log_det(Xtest, Ytest, pi, mu, sigma_sqr, A, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test)
-    kl_test = eval_KL(Xtest, log_det_test)
-    KLs_test += kl_test,
-    print('KL (test):', kl_test)
+    log_det_test += compute_log_det(Xtest, Ytest, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test,
+                                    pi=pi, mu=mu, sigma_sqr=sigma_sqr)
+    log_det_test += torch.log(torch.abs(torch.det(A)))
+    nll_test = eval_NLL(Xtest, log_det_test)
+    NLLs_test += nll_test,
+    print('NLL (test):', nll_test)
     print()
+    kl_test = eval_KL(Xtest)
+    KLs_test += kl_test,
 
     if USE_WANDB:
       wandb.log({
+        'NLL': nll,
+        'NLLtest': nll_test,
         'KL': kl,
         'KLtest': kl_test,
         'diff_from_I': diff_from_I,
@@ -223,8 +243,16 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         np.save(os.path.join(args.save_dir, 'model', 'sigma_sqr_i{}.npy'.format(i)), sigma_sqr.cpu().numpy())
         if TIME:
           avg_time['save'] += time() - save_start,
+        np.save(os.path.join(args.save_dir, 'NLLs.npy'), np.array(NLLs))
+        np.save(os.path.join(args.save_dir, 'NLLs_test.npy'), np.array(NLLs_test))
         np.save(os.path.join(args.save_dir, 'KLs.npy'), np.array(KLs))
         np.save(os.path.join(args.save_dir, 'KLs_test.npy'), np.array(KLs_test))
+      plt.plot(np.array(NLLs))
+      plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL_log.png'))
+      plt.close()
+      plt.plot(np.array(NLLs_test))
+      plt.savefig(os.path.join(args.save_dir, 'figs', 'NLLtest_log.png'))
+      plt.close()
       plt.plot(np.array(KLs))
       plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log.png'))
       plt.close()
@@ -241,7 +269,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
           # time returned from EM call
           print('--  {}: {:.4e}'.format(key, np.array(avg_time[key]).mean()))
       print('G1D : {:.4e}'.format(np.array(avg_time['G1D']).mean()))
-      print('KL  : {:.4e}'.format(np.array(avg_time['KL']).mean()))
+      print('NLL  : {:.4e}'.format(np.array(avg_time['KL']).mean()))
       print('Save: {:.4e}'.format(np.array(avg_time['save']).mean() if avg_time['save'] else 0))
       print()
   if TIME:
@@ -249,12 +277,22 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     with open(ftime, 'wb') as handle:
       pickle.dump(avg_time, handle)
   # train
+  NLLs = np.array(NLLs)
+  np.save(os.path.join(args.save_dir, 'NLLs.npy'), KLs)
+  plt.plot(NLLs)
+  plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL_log.png'))
+  plt.close()
   KLs = np.array(KLs)
   np.save(os.path.join(args.save_dir, 'KLs.npy'), KLs)
   plt.plot(KLs)
   plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log.png'))
   plt.close()
   # test
+  NLLs_test = np.array(NLLs_test)
+  np.save(os.path.join(args.save_dir, 'NLLs_test.npy'), KLs_test)
+  plt.plot(NLLs_test)
+  plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL_log_test.png'))
+  plt.close()
   KLs_test = np.array(KLs_test)
   np.save(os.path.join(args.save_dir, 'KLs_test.npy'), KLs_test)
   plt.plot(KLs_test)
@@ -348,8 +386,8 @@ if __name__ == '__main__':
     fdata_val = os.path.join(power_dir, 'val_normed.npy')
   elif data_token == 'gas':
     gas_dir = 'GAS/'
-    fdata = os.path.join(gas_dir, 'ethylene_CO_train_normed.npy')
-    fdata_val = os.path.join(gas_dir, 'ethylene_CO_val_normed.npy')
+    fdata = os.path.join(gas_dir, 'ethylene_CO_trainSmall_normed.npy')
+    fdata_val = os.path.join(gas_dir, 'ethylene_CO_valSmall_normed.npy')
   
   data_token += args.save_token
 
