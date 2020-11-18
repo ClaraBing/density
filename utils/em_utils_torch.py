@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 import torch.distributions as dists
+import torch.nn.functional as F
 from scipy.stats import ortho_group, norm
 import matplotlib
 matplotlib.use('Agg')
@@ -15,7 +16,7 @@ from time import time
 
 # local imports
 from data.dataset_mixture import GaussianMixture
-from utils.rbig_util import logistic_kernel_cdf, logistic_kernel_cdf, logistic_kernel_log_sf
+from utils.rbig_util import logistic_kernel_cdf, logistic_kernel_log_cdf, logistic_kernel_log_sf, logistic_inverse_normal_cdf
 
 import pdb
 
@@ -68,12 +69,10 @@ def update_EM(X, A, pi, mu, sigma_sqr,
   niters = 0
   dsigma_sqr = 10,
   ret_time = {'E':[], 'obj':[]}
-  grad_norms, objs= [], [] 
 
   while (not END(dsigma_sqr)) and niters < max_em_steps:
     niters += 1
     A_prev, sigma_sqr_prev = A.clone(), sigma_sqr.clone()
-    objs += [],
 
     if TIME: e_start = time()
     Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr, Y=Y)
@@ -81,8 +80,8 @@ def update_EM(X, A, pi, mu, sigma_sqr,
 
     # M-step
     pi, mu, sigma_sqr = M(X, A, w, w_sumN, w_sumNK)
-    obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
-    objs[-1] += obj,
+    # obj = get_objetive(X, A, pi, mu, sigma_sqr, w)
+    # objs[-1] += obj,
 
   if VERBOSE:
     print('#{}: dsigma_sqr={:.3e}'.format(niters, dsigma_sqr))
@@ -91,7 +90,7 @@ def update_EM(X, A, pi, mu, sigma_sqr,
     for key in ret_time:
       ret_time[key] = np.array(ret_time[key]) if ret_time[key] else 0
 
-  return pi, mu, sigma_sqr, grad_norms, objs, ret_time 
+  return pi, mu, sigma_sqr, ret_time 
 
 def update_A(A_mode, X):
   N, D = X.shape
@@ -171,7 +170,7 @@ def M(X, A, w, w_sumN, w_sumNK, Y=None):
 def generate_bandwidth(datapoints):
     total_datapoints = datapoints.shape[0]
     # scale ~ 0.13
-    scale = (4. * np.sqrt(math.pi) / ((math.pi ** 4) * total_datapoints)) ** (0.2)
+    scale = (4. * np.sqrt(np.pi) / ((np.pi ** 4) * total_datapoints)) ** (0.2)
     bandwidth = torch.std(datapoints, dim=0, keepdim=True) * scale
     return bandwidth
 
@@ -283,6 +282,53 @@ def gaussianize_1d(X, pi, mu, sigma_sqr, datapoints=None, bandwidth=None):
 
   return new_X, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right]
 
+# compute inverse normal CDF - RBIG version
+def logistic_inverse_normal_cdf_cp(x, bandwidth, datapoints, inverse_cdf_by_thresh=False):
+    if x.dtype != bandwidth.dtype:
+      bandwidth = bandwidth.type(x.dtype)
+    if x.dtype != datapoints.dtype:
+      datapoints = datapoints.type(x.dtype)
+    mask_bound = 0.5e-7
+    cdf_l = logistic_kernel_cdf(x, datapoints, h=bandwidth)
+    log_cdf_l = logistic_kernel_log_cdf(x, datapoints, h=bandwidth)  # log(CDF)
+    log_sf_l = logistic_kernel_log_sf(x, datapoints, h=bandwidth)  # log(1-CDF)
+
+    # Approximate Gaussian CDF
+    # inv(CDF) ~ np.sqrt(-2 * np.log(1-x)) #right, x -> 1
+    # inv(CDF) ~ -np.sqrt(-2 * np.log(x)) #left, x -> 0
+    # 1) Step1: invert good CDF
+    cdf_mask = ((cdf_l > mask_bound) & (cdf_l < 1 - (mask_bound))).double()
+    # Keep good CDF, mask the bad CDF values to 0.5(inverse(0.5)=0.)
+    cdf_l_good = cdf_l * cdf_mask + 0.5 * (1. - cdf_mask)
+    inverse_l = normal_distribution.icdf(cdf_l_good)
+
+    # 2) Step2: invert BAD large CDF
+    cdf_mask_right = (cdf_l >= 1. - (mask_bound)).double()
+    # Keep large bad CDF, mask the good and small bad CDF values to 0.
+    cdf_l_bad_right_log = log_sf_l * cdf_mask_right
+    inverse_l += torch.sqrt(-2. * cdf_l_bad_right_log)
+
+    # 3) Step3: invert BAD small CDF
+    cdf_mask_left = (cdf_l <= mask_bound).double()
+    # Keep small bad CDF, mask the good and large bad CDF values to 1.
+    cdf_l_bad_left_log = log_cdf_l * cdf_mask_left
+    inverse_l += (-torch.sqrt(-2 * cdf_l_bad_left_log))
+
+    if inverse_cdf_by_thresh:
+      # remove outliers 
+      cdf_l[cdf_l<mask_bound] = mask_bound
+      cdf_l[cdf_l>1-mask_bound] = 1 - mask_bound
+      # pdb.set_trace()
+      # new_distr = cdf_l.sum(-1)
+      new_X = norm.ppf(cdf_l.cpu())
+      new_X = to_tensor(new_X)
+      ret_x = new_X
+    else:
+      ret_x = inverse_l 
+
+    return ret_x, cdf_mask, [log_cdf_l, cdf_mask_left], [log_sf_l, cdf_mask_right]
+
+
 def compute_log_det_v2(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right,
                     pi=None, mu=None, sigma_sqr=None,
                     datapoints=None, h=None):
@@ -302,7 +348,6 @@ def compute_log_det_v2(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_m
                - torch.log(h[None, ...]) \
                - 2 * F.softplus(-(x[None, ...] - datapoints[:, None, :]) / h[None, ...]) - np.log(Nd)
     log_pdf = torch.logsumexp(log_pdfs, dim=0).double()
-    pdb.set_trace()
 
   # d phi^{-1} / dp
   p1 = 0.5 * np.log(2*np.pi) + 0.5 * X**2
@@ -316,10 +361,17 @@ def compute_log_det(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask
   # NOTE: currently debugging this function.
   # Y should be rotated & before Gaussianization,
   # X should be Gaussiznied.
-  N, D = Y.shape
-  scaled = (Y.unsqueeze(-1) - mu) / sigma_sqr**0.5
-  log_pdfs = - 0.5 * scaled**2 + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr**0.75)
-  log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
+  N, D = X.shape
+  if h is None and pi is not None:
+    scaled = (Y.unsqueeze(-1) - mu)**2 / sigma_sqr
+    log_pdfs = - 0.5 * scaled + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr**0.75)
+    log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
+  else:
+    Nd = datapoints.shape[0]
+    log_pdfs = -(Y[None, ...] - datapoints[:, None, :]) / h[None, ...] \
+               - torch.log(h[None, ...]) \
+               - 2 * F.softplus(-(Y[None, ...] - datapoints[:, None, :]) / h[None, ...]) - np.log(Nd)
+    log_pdf = torch.logsumexp(log_pdfs, dim=0).double()
 
   # t2 = (X**2).sum() / N + 0.5*np.log(2*np.pi)
 
