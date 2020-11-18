@@ -3,6 +3,7 @@ import torch
 import math
 import numpy as np
 from sklearn.decomposition import FastICA
+from scipy.stats import ortho_group, norm
 import torchvision
 import torch.nn.functional as F
 import torch.distributions as tdist
@@ -14,6 +15,9 @@ import pdb
 SILENT = True
 SINGULAR_SMALL = 1e-5
 
+DTYPE = torch.DoubleTensor
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
 # set random seed
 torch.manual_seed(1234)
 np.random.seed(1234)
@@ -21,8 +25,6 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(1234)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 normal_distribution = tdist.Normal(0, 1)
 
@@ -184,9 +186,8 @@ def logistic_inverse_normal_cdf(x, bandwidth, datapoints, inverse_cdf_by_thresh=
       # remove outliers 
       cdf_l[cdf_l<mask_bound] = mask_bound
       cdf_l[cdf_l>1-mask_bound] = 1 - mask_bound
-      pdb.set_trace()
-      new_distr = cdf_l.sum(-1)
-      new_X = norm.ppf(new_distr)
+      # new_distr = cdf_l.sum(-1)
+      new_X = norm.ppf(cdf_l.cpu())
       new_X = to_tensor(new_X)
       ret_x = new_X
     else:
@@ -239,7 +240,6 @@ def sampling(rotation_matrices, data_anchors, bandwidths, image_name='RBIG_sampl
 
     if d is not None:
       x = x.detach().cpu().numpy()
-      # pdb.set_trace()
       plot_samples(x, title=image_name)
     elif channel is not None:
       x = x.reshape(sample_num, channel, image_size, image_size)
@@ -276,7 +276,6 @@ def generate_orthogonal_matrix(data_anchor, rot_type="PCA", verbose=False):
           if ss[-1] / ss[0] < SINGULAR_SMALL:
             rot_orig += np.eye(rot_orig.shape[0]) * SINGULAR_SMALL
           # print('ICA: rot_orig')
-          # pdb.set_trace()
           rotation_matrix = np.linalg.inv(rot_orig)
           _, ss, _ = np.linalg.svd(rotation_matrix)
           rotation_matrix /= ss[0]
@@ -323,4 +322,8 @@ def check_cov(X):
   print('  diff from I: {}'.format(diff_from_I))
   return diff_from_I, ss[0], ss[-1], ss.mean()
 
+def to_tensor(data):
+  if not isinstance(data, torch.Tensor):
+    data = torch.tensor(data)
+  return data.type(DTYPE).to(device)
 

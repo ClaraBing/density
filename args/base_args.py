@@ -32,8 +32,10 @@ class BaseArgs:
                              help="RBIG: whether to calc the per-dim Gaussianized data with a thresholded CDF.")
     # Data
     self.parser.add_argument('--dataset', type=str, choices=['cifar10', 'MNIST', 'FashionMNIST',
-                             'GAS8', 'GAS16', 'GAS128', 'miniboone', 'MNISTtab', 'hepmass',
+                             'gas', 'GAS8', 'GAS16', 'GAS128', 'miniboone', 'MNISTtab', 'hepmass',
                              'GaussianLine', 'GaussianMixture', 'uniform'])
+    self.parser.add_argument('--n-pts', type=int,
+                             help="Number of points in the dataset; subsample points when the dataset is too large. Currently used for gas.")
     self.parser.add_argument('--num-workers', type=int, default=4)
     self.parser.add_argument('--bt', default=64, type=int, help='Batch size')
     self.parser.add_argument('--bt-test', default=64, type=int, help='Test/val batch size')

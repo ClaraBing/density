@@ -5,6 +5,7 @@ import torch.utils.data as data
 import torchvision
 from torchvision import transforms
 from torchvision.datasets import MNIST, FashionMNIST
+from .dataset_gas import gas
 from .dataset_gas8 import GAS8
 from .dataset_gas16 import GAS16
 from .dataset_gas128 import GAS128
@@ -36,6 +37,8 @@ def get_loader(args, is_train):
     dset = GAS16(args.norm_by_col)
   elif dataset == 'GAS128':
     dset = GAS128(args.norm_by_col)
+  elif dataset == 'gas':
+    dset = gas(args.n_pts)
   elif dataset == 'hepmass':
     dset = HEPMASS()
   elif dataset == 'miniboone':

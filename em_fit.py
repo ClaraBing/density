@@ -16,8 +16,6 @@ import pdb
 parser = argparse.ArgumentParser()
 parser.add_argument('--K', type=int, default=10)
 parser.add_argument('--n-pts', type=int, default=0)
-parser.add_argument('--gamma', type=float, default=0.1)
-parser.add_argument('--gamma-min', type=float, default=0.001)
 parser.add_argument('--n-steps', type=int, default=50)
 parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
@@ -43,16 +41,16 @@ parser.add_argument('--pca-dim', type=int, default=0,
 parser.add_argument('--save-token', type=str, default='')
 parser.add_argument('--save-dir', type=str)
 parser.add_argument('--time', type=int, default=0)
-parser.add_argument('--check-obj', type=int, default=0)
 args = parser.parse_args()
 
 from utils.em_utils_torch import *
+# from rbig_util import *
 
 ga_token = ''
-if args.mode not in ['ICA', 'PCA', 'random']:
+if args.mode in ['ICA', 'PCA', 'random']:
   ga_token = '_'+args.grad_mode
-if args.grad_mode == 'GA':
-  ga_token += '_gamma{}_gammaMin{}'.format(args.gamma, args.gamma_min)
+else:
+  raise NotImplementedError("Not currently support: args.mode={}. Sorry! > <".format(args.mode))
 args.save_dir = '{}/mode{}_K{}_iter{}_em{}_gd{}{}'.format(
       args.data, args.mode, args.K, args.n_steps, args.n_em, args.n_gd, ga_token)
 if args.n_pts:
@@ -74,7 +72,6 @@ SAVE_NPY = False
 VERBOSE = False
 
 TIME=args.time
-CHECK_OBJ=args.check_obj
 
 data_dir = './datasets/'
 args.save_dir = os.path.join(SAVE_ROOT, args.save_dir)
@@ -96,8 +93,6 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   D = X.shape[1]
   K = args.K
   n_steps = args.n_steps
-  gamma_low, gamma_up = args.gamma_min, args.gamma
-  gammas = get_aranges(gamma_low, gamma_up, n_steps)
   threshs = get_aranges(1e-9, 1e-5, n_steps)
   A = init_A(D)
   pi, mu, sigma_sqr = init_GM_params(D, K, mu_low, mu_up)
@@ -121,7 +116,6 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     X, _, _, _ = gaussianize_1d(X, pi=pi, mu=mu, sigma_sqr=sigma_sqr) 
     Xtest, _, _, _ = gaussianize_1d(Xtest, pi=pi, mu=mu, sigma_sqr=sigma_sqr)
 
-  grad_norms_total = []
   if TIME:
     avg_time = {'EM':[], 'NLL':[], 'G1D':[], 'save':[], 'iter':[]}
     default_keys = list(avg_time.keys())
@@ -133,7 +127,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     if TIME:
       em_start = time()
     A = update_A(A_mode, X)
-    pi, mu, sigma_sqr, grad_norms, objs, ret_time = update_EM(X, A, pi, mu, sigma_sqr,
+    pi, mu, sigma_sqr, ret_time = update_EM(X, A, pi, mu, sigma_sqr,
               threshs[i], max_em_steps=args.n_em, n_gd_steps=args.n_gd)
 
     if TIME:
@@ -141,8 +135,6 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         if key not in avg_time: avg_time[key] = []
         avg_time[key] += ret_time[key],
       avg_time['EM'] += time() - em_start,
-    if grad_norms:
-      grad_norms_total += np.array(grad_norms).mean(),
 
     if type(X) is torch.Tensor:
       Y = X.matmul(A.T)
@@ -154,18 +146,11 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     if VERBOSE:
       print('mu: mean={:.3e}/ std={:.3e}'.format(mu.mean(), mu.std()))
       print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
-    if CHECK_OBJ:
-      for emi, obj in enumerate(objs):
-        fimg = 'figs/objs/objs_step{}_em{}.png'.format(i, emi)
-        fimg = os.path.join(args.save_dir, fimg)
-        plt.plot(obj)
-        plt.savefig(fimg)
-        plt.close()
 
-    fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}_Y.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
+    fimg = 'figs/hist2d_{}_mode{}_K{}_iter{}_Y.png'.format(data_token, A_mode, K, i)
     fimg = os.path.join(args.save_dir, fimg)
     plot_hist(Y, fimg)
-    fimg = 'figs/hist2d_test_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}_Y.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
+    fimg = 'figs/hist2d_test_{}_mode{}_K{}_iter{}_Y.png'.format(data_token, A_mode, K, i)
     fimg = os.path.join(args.save_dir, fimg)
     plot_hist(Ytest, fimg)
 
@@ -188,7 +173,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     diff_from_I, sigma_max, sigma_min, sigma_mean = check_cov(X)
 
     x = X
-    fimg = 'figs/hist2d_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
+    fimg = 'figs/hist2d_{}_mode{}_K{}_iter{}.png'.format(data_token, A_mode, K, i)
     fimg = os.path.join(args.save_dir, fimg)
     if torch.isnan(x.max()) or torch.isnan(x.min()):
       print('X: NaN')
@@ -196,11 +181,10 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     plot_hist(x, fimg)
 
     # check on test data
-    prevXtest = Xtest.clone()
     Xtest, cdf_mask_test, [log_cdf_test, cdf_mask_left_test], [log_sf_test, cdf_mask_right_test] = gaussianize_1d(Ytest, pi, mu, sigma_sqr)
     diff_from_I_test, sigma_max_test, sigma_min_test, sigma_mean_test = check_cov(Xtest)
     x = Xtest
-    fimg = 'figs/hist2d_test_{}_mode{}_K{}_gamma{}_gammaMin{}_iter{}.png'.format(data_token, A_mode, K, gamma_up, gamma_low, i)
+    fimg = 'figs/hist2d_test_{}_mode{}_K{}_iter{}.png'.format(data_token, A_mode, K, i)
     fimg = os.path.join(args.save_dir, fimg)
     if torch.isnan(x.max()) or torch.isnan(x.min()):
       print('Xtest: NaN')
@@ -299,12 +283,6 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log_test.png'))
   plt.close()
 
-  if args.mode == 'GA':
-    np.save(os.path.join(args.save_dir, 'grad_norms.npy'), np.array(grad_norms_total))
-    plt.plot(grad_norms_total)
-    plt.savefig(os.path.join(args.save_dir, 'figs', 'grad_norms.png'))
-    plt.close()
-
 
 if __name__ == '__main__':
   # test()
@@ -318,8 +296,6 @@ if __name__ == '__main__':
   os.makedirs(args.save_dir, exist_ok=True)
   os.makedirs(os.path.join(args.save_dir, 'model'), exist_ok=True)
   os.makedirs(os.path.join(args.save_dir, 'figs'), exist_ok=True)
-  if CHECK_OBJ:
-    os.makedirs(os.path.join(args.save_dir, 'figs', 'objs'), exist_ok=True)  
 
   data_token = args.data
   mu_low, mu_up = -2, 2

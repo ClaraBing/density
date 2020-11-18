@@ -1,39 +1,54 @@
 #!/bin/bash
 
-rot_type='ICA'
+rot_type='PCA'
+inverse_cdf_by_thresh=1
 
 # dataset='GaussianLine'
 # dataset='GaussianMixture'
 # dataset='uniform'
 # dataset='GAS8'
+dataset='gas'
 # dataset='miniboone'
 # dataset='GaussianMixture'
-dataset='MNISTtab'
-dlen=50000
-bt_test=100
+# dataset='MNISTtab'
+pca_dim=100
+# dataset='hepmass'
+dlen=0
+bt_test=200
+n_pts=0
 
 # dataset='GM'
 
-# save_suffix='_data200k_run1'
-# save_suffix='_btVal100_randProj'
-# save_suffix='_btVal'$bt_test'_checkCov_proj10'
-save_suffix='_btVal'$bt_test
-
 for run in 1
 do
-save_suffix='_btVal'$bt_test'_run'$run
-for n_layer in 20
+for rot_type in 'PCA'
 do
-CUDA_VISIBLE_DEVICES=1 python -W ignore rbig.py \
+for inverse_cdf_by_thresh in 1
+do
+# 'newData' is for MNISTTab
+# save_suffix='_btVal'$bt_test'_newData_run'$run
+save_suffix='_btVal'$bt_test'_run'$run'_tmpDebug_addLogDet'
+if [ $inverse_cdf_by_thresh -eq 1 ]; then
+  save_suffix=$save_suffix'_myG1D'
+else
+  save_suffix=$save_suffix'_origG1D'
+fi
+for n_layer in 100
+do
+CUDA_VISIBLE_DEVICES=0 python -W ignore rbig.py \
   --model='rbig' \
   --dataset=$dataset \
+  --n-pts=$n_pts \
   --use-val=1 \
   --bt=50000 \
   --bt-test=$bt_test \
+  --inverse-cdf-by-thresh=$inverse_cdf_by_thresh \
   --rotation-type=$rot_type \
   --n-layer=$n_layer \
+  --pca-dim=$pca_dim \
   --save-suffix=$save_suffix \
   --dlen=$dlen
 done
 done
-
+done
+done

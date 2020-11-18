@@ -77,11 +77,11 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
       data_anchors = [DATA]
       bandwidths = []
       vectors = []
-      kl_layer = [[] for _ in range(n_layer)]
+      nll_layer = [[] for _ in range(n_layer)]
       bpd_layer = [[] for _ in range(n_layer)]
       log_prob_layer = [[] for _ in range(n_layer)]
       log_det_train = torch.zeros(process_size).double().to(device)
-      kl_layer_train = []
+      nll_layer_train = []
       for batch_idx, data in enumerate(val_loader):
           if type(data) is list or type(data) is tuple:
             data = data[0]
@@ -143,6 +143,8 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
                 start = time()
               log_det += compute_log_det(data, inverse_l, data_anchors[prev_l], cdf_mask,
                                                log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right, h=bandwidth)
+              # TODO: should I add this? 
+              log_det += torch.log(torch.abs(torch.det(rotation_matrices[prev_l])))
               if TIME:
                 times['log_det'] += time() - start,
               # rotation
@@ -168,10 +170,14 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
                       if b == 0:
                         log_det_train += compute_log_det(cur_data_batch, inverse_data, data_anchors[prev_l], cdf_mask_train,
                                                          log_cdf_l_train, cdf_mask_left_train, log_sf_l_train, cdf_mask_right_train, h=bandwidth)
-                        train_loss_curr_layer, train_log_prob_curr_layer = flow_loss(cur_data_batch, log_det)
-                        kl_layer_train += train_loss_curr_layer.item(),
+                        log_det_train += torch.log(torch.abs(torch.det(rotation_matrices[prev_l])))
+                        train_loss_curr_layer, train_log_prob_curr_layer = flow_loss(cur_data_batch, log_det_train)
+                        nll_layer_train += train_loss_curr_layer.item(),
                         if USE_WANDB:
-                          wandb.log({'KL':train_loss_curr_layer.item()})
+                          wandb.log({
+                            'NLL':train_loss_curr_layer.item(),
+                            'KL': train_log_prob_curr_layer.item()
+                          })
 
                       if TIME:
                         times['inverse_cdf'] += time() - start,
@@ -187,10 +193,11 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
 
               val_loss_curr_layer, val_log_prob_curr_layer = flow_loss(data, log_det)
               diff_from_Itest, sigma_max_test, sigma_min_test, sigma_mean_test = check_cov(data)
-              kl_layer[prev_l] += val_loss_curr_layer.item(),
+              nll_layer[prev_l] += val_loss_curr_layer.item(),
               if USE_WANDB:
                 wandb.log({
-                  'KLtest': val_loss_curr_layer.item(),
+                  'NLLtest': val_loss_curr_layer.item(),
+                  'KLtest': val_log_prob_curr_layer.item(),
                   'diff_from_I': diff_from_I,
                   'diff_from_Itest': diff_from_Itest,
                   'sigma_max': sigma_max,
@@ -199,6 +206,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
                   'sigma_min_test': sigma_min_test,
                   'sigma_mean': sigma_mean,
                   'sigma_mean_test': sigma_mean_test,
+                  'detA': torch.det(rotation_matrices[prev_l]).item()
                 })
               test_bpd_curr_layer = (val_loss_curr_layer.item() * data.shape[0] - log_det_logit) * (
                       1 / (np.log(2) * np.prod(data.shape))) + 8
@@ -227,24 +235,24 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
 
             if batch_idx == 0:
               if VERBOSE:
-                print('Train KL: {}\n'.format(' / '.join(['layer{}: {:.4e}'.format(i+1, kl_train) for (i, kl_train) in enumerate(kl_layer_train)])))
-              plt.plot(np.array(kl_layer_train))
-              plt.savefig('{}/images/RBIG_trainKLbyLayer_{}_{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type))
+                print('Train NLL: {}\n'.format(' / '.join(['layer{}: {:.4e}'.format(i+1, nll_train) for (i, nll_train) in enumerate(nll_layer_train)])))
+              plt.plot(np.array(nll_layer_train))
+              plt.savefig('{}/images/RBIG_trainNLLbyLayer_{}_{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type))
               plt.close()
 
-            kl_means, bpd_means, log_prob_means = [], [], []
+            nll_means, bpd_means, log_prob_means = [], [], []
             for li in range(n_layer):
-              curr_kl = np.array(kl_layer[li])
+              curr_nll = np.array(nll_layer[li])
               curr_bpd = np.array(bpd_layer[li])
               curr_log_prob = np.array(log_prob_layer[li])
               if VERBOSE:
                 print('Layer {}: mean={:.3e} / std={:.3e} / max={:.3e} / min={:.3e}'.format(
                   li, curr.mean(), curr.std(), curr.max(), curr.min()))
-              kl_means += curr_kl.mean(),
+              nll_means += curr_nll.mean(),
               bpd_means += curr_bpd.mean(),
               log_prob_means += curr_log_prob.mean(),
-            plt.plot(kl_means)
-            plt.savefig('{}/images/RBIG_KLbyLayer_{}_{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type))
+            plt.plot(nll_means)
+            plt.savefig('{}/images/RBIG_NLLbyLayer_{}_{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type))
             plt.close()
             plt.plot(bpd_means)
             plt.savefig('{}/images/RBIG_BPDbyLayer_{}_{}_tmp.png'.format(out_dir, args.dataset, args.rotation_type))
@@ -256,14 +264,14 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
           else:
             break
 
-      print('KL by layer.')
+      print('NLL by layer.')
       for li in range(n_layer):
-        kl_layer[li] = np.array(kl_layer[li])
+        nll_layer[li] = np.array(nll_layer[li])
         print('Layer {}: mean={:.3e} / std={:.3e} / max={:.3e} / min={:.3e}'.format(
-           li, kl_layer[li].mean(), kl_layer[li].std(), kl_layer[li].max(), kl_layer[li].min()))
+           li, nll_layer[li].mean(), nll_layer[li].std(), nll_layer[li].max(), nll_layer[li].min()))
       print()
-      plt.plot([each.mean() for each in kl_layer])
-      plt.savefig('{}/images/RBIG_KLbyLayer_{}_{}.png'.format(out_dir, args.dataset, args.rotation_type))
+      plt.plot([each.mean() for each in nll_layer])
+      plt.savefig('{}/images/RBIG_NLLbyLayer_{}_{}.png'.format(out_dir, args.dataset, args.rotation_type))
       plt.close()
 
       print('BPD by layer.')

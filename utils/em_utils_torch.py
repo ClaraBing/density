@@ -17,6 +17,7 @@ from time import time
 # local imports
 from data.dataset_mixture import GaussianMixture
 from utils.rbig_util import logistic_kernel_cdf, logistic_kernel_log_cdf, logistic_kernel_log_sf, logistic_inverse_normal_cdf
+from utils.variational_util import variational_KL
 
 import pdb
 
@@ -128,7 +129,7 @@ def update_A(A_mode, X):
       print('ICA failed. Use random orthonormal matrix.')
       A = to_tensor(ortho_group.rvs(D))
   elif A_mode == 'variational':
-    raise NotImplementedError("variational")
+    A = to_tensor(variational_KL(X, 100))
   elif A_mode == 'Wasserstein':
     raise NotImplementedError("Wasserstein")
   return A
