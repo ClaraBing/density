@@ -374,8 +374,6 @@ def compute_log_det(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask
                - 2 * F.softplus(-(Y[None, ...] - datapoints[:, None, :]) / h[None, ...]) - np.log(Nd)
     log_pdf = torch.logsumexp(log_pdfs, dim=0).double()
 
-  # t2 = (X**2).sum() / N + 0.5*np.log(2*np.pi)
-
   # TODO: is this correct?
   log_gaussian_derivative_good = dists.Normal(0, 1).log_prob(X) * cdf_mask
   # log_gaussian_derivative_good = dists.Normal(0, 1).log_prob(Y) * cdf_mask
