@@ -20,7 +20,6 @@ parser.add_argument('--n-pts', type=int, default=0)
 parser.add_argument('--n-anchors', type=int, default=500)
 parser.add_argument('--n-steps', type=int, default=50)
 parser.add_argument('--n-em', type=int, default=30)
-parser.add_argument('--n-gd', type=int, default=20)
 parser.add_argument('--mode', type=str, default='GA',
                     choices=['ICA', 'PCA', 'random', 'None', 'variational', 'Wasserstein'])
 parser.add_argument('--density-type', type=str, choices=['GM', 'KDE'])
@@ -46,33 +45,43 @@ args = parser.parse_args()
 from utils.em_utils_torch import *
 # from utils.rbig_util import *
 
-ga_token = ''
-if args.mode not in ['ICA', 'PCA', 'random']:
-  ga_token = '_'+args.grad_mode
-args.save_dir = '{}/mode{}_K{}_iter{}_em{}_gd{}{}'.format(
-      args.data, args.mode, args.K, args.n_steps, args.n_em, args.n_gd, ga_token)
+
+if args.density_type == 'GM':
+  d_token = 'em{}_K{}'.format(args.n_em, args.K)
+elif args.density_type == 'KDE':
+  d_token = 'nAncs{}'.format(args.n_anchors)
+args.save_dir = '{}/mode{}_iter{}_{}'.format(
+      args.data, args.mode, args.n_steps, d_token)
 if args.n_pts:
   args.save_dir += '_nPts{}'.format(args.n_pts)
 if args.save_token:
   args.save_dir += '_' + args.save_token
+SAVE_ROOT = 'runs_gaussianization'
+args.save_dir = os.path.join(SAVE_ROOT, args.save_dir)
+if os.path.exists(args.save_dir):
+  proceed = input('Dir exist: {} \n Do you want to proceed? (y/N)'.format(args.save_dir))
+  if 'y' not in proceed:
+    print('Exiting. Bye!')
+    exit(0)
+os.makedirs(args.save_dir, exist_ok=True)
+os.makedirs(os.path.join(args.save_dir, 'model'), exist_ok=True)
+os.makedirs(os.path.join(args.save_dir, 'figs'), exist_ok=True)
 
 try:
   import wandb
-  wandb.init(project='density', name=args.save_dir, config=args)
+  wandb.init(project='density', name=os.path.basename(args.save_dir), config=args)
   USE_WANDB = True
 except Exception as e:
   print('Exception:', e)
   print('Not using wandb. \n\n')
   USE_WANDB = False
 
-SAVE_ROOT = 'runs_gaussianization'
-SAVE_NPY = False
+SAVE_NPY = True
 VERBOSE = False
 
 TIME=args.time
 
 data_dir = './datasets/'
-args.save_dir = os.path.join(SAVE_ROOT, args.save_dir)
 
 def fit(X, Xtest, mu_low, mu_up, data_token=''):
   x = X
@@ -119,12 +128,11 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   # Iterating over the layers
   for i in range(n_steps):
     iter_start = time()
-    print('iteration {} - data={} - mode={}{}'.format(i, args.data, args.mode,
-          '(grad {})'.format(args.grad_mode) if args.mode in ['GA', 'torchGA', 'torchAll'] else ''))
+    print('iteration {} - data={} - mode={}'.format(i, args.data, args.mode))
     if TIME:
       em_start = time()
     if args.density_type == 'GM':
-      pi, mu, sigma_sqr, ret_time = update_EM(X, A, pi, mu, sigma_sqr,
+      pi, mu, sigma_sqr, ret_time = update_EM(X, None, pi, mu, sigma_sqr,
                 threshs[i], max_em_steps=args.n_em, n_gd_steps=args.n_gd)
     elif args.density_type == 'KDE':
       bandwidth = generate_bandwidth(X)
@@ -135,6 +143,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     if args.density_type == 'GM':
       X_gaussianized, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right] = gaussianize_1d(X, pi, mu, sigma_sqr)
       X_gaussianized_test, cdf_mask_test, [log_cdf_test, cdf_mask_left_test], [log_sf_test, cdf_mask_right_test] = gaussianize_1d(Xtest, pi, mu, sigma_sqr)
+
     elif args.density_type == 'KDE':
       X_gaussianized, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right] = logistic_inverse_normal_cdf(X, bandwidth=bandwidth, datapoints=X[:args.n_anchors], inverse_cdf_by_thresh=args.inverse_cdf_by_thresh)
       X_gaussianized_test, cdf_mask_test, [log_cdf_test, cdf_mask_left_test], [log_sf_test, cdf_mask_right_test] = logistic_inverse_normal_cdf(Xtest, bandwidth=bandwidth, datapoints=X[:args.n_anchors], inverse_cdf_by_thresh=args.inverse_cdf_by_thresh)
@@ -142,21 +151,26 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
 
     # compute log det
     if args.density_type == 'GM':
-      log_det += compute_log_det(X_gaussianized, X, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right,
+      log_det_cur = compute_log_det(X_gaussianized, X, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right,
                                  pi=pi, mu=mu, sigma_sqr=sigma_sqr)
-      log_det_test += compute_log_det(X_gaussianized_test, Xtest, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test,
+      log_det += log_det_cur
+      log_det_test_cur = compute_log_det(X_gaussianized_test, Xtest, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test,
                                  pi=pi, mu=mu, sigma_sqr=sigma_sqr)
+      log_det_test += log_det_test_cur
+
     elif args.density_type == 'KDE':
-      log_det += compute_log_det(X_gaussianized, X, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right,
+      log_det_cur = compute_log_det(X_gaussianized, X, cdf_mask, log_cdf, cdf_mask_left, log_sf, cdf_mask_right,
                                  datapoints=X[:args.n_anchors], h=bandwidth)
-      log_det_test += compute_log_det(X_gaussianized_test, Xtest, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test,
+      log_det += log_det_cur
+      log_det_test_cur = compute_log_det(X_gaussianized_test, Xtest, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test,
                                  datapoints=X[:args.n_anchors], h=bandwidth)
+      log_det_test += log_det_test_cur
 
     A = update_A(A_mode, X_gaussianized)
     log_det_A = torch.log(torch.abs(torch.det(A)))
     log_det += log_det_A
     log_det_test += log_det_A
-
+    
     if TIME:
       for key in ret_time:
         if key not in avg_time: avg_time[key] = []
@@ -166,13 +180,6 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     # rotate
     X = X_gaussianized.matmul(A.T)
     Xtest = X_gaussianized_test.matmul(A.T)
-
-    fimg = 'figs/hist2d_{}_mode{}{}_iter{}_Xgauss.png'.format(data_token, A_mode, '_{}'.format(args.K) if args.density_type=='GM' else '', i)
-    fimg = os.path.join(args.save_dir, fimg)
-    plot_hist(X_gaussianized, fimg)
-    fimg = 'figs/hist2d_test_{}_mode{}{}_iter{}_Y.png'.format(data_token, A_mode, '_{}'.format(args.K) if args.density_type=='GM' else '', i)
-    fimg = os.path.join(args.save_dir, fimg)
-    plot_hist(X_gaussianized_test, fimg)
 
     if TIME: nll_start = time()
     nll = eval_NLL(X, log_det)
@@ -191,6 +198,15 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     diff_from_I, sigma_max, sigma_min, sigma_mean = check_cov(X)
     diff_from_I_test, sigma_max_test, sigma_min_test, sigma_mean_test = check_cov(Xtest)
 
+    # Plot densities
+    # 1. gaussianized
+    fimg = 'figs/hist2d_{}_mode{}{}_iter{}_Xgauss.png'.format(data_token, A_mode, '_{}'.format(args.K) if args.density_type=='GM' else '', i)
+    fimg = os.path.join(args.save_dir, fimg)
+    plot_hist(X_gaussianized, fimg)
+    fimg = 'figs/hist2d_test_{}_mode{}{}_iter{}_Xgauss.png'.format(data_token, A_mode, '_{}'.format(args.K) if args.density_type=='GM' else '', i)
+    fimg = os.path.join(args.save_dir, fimg)
+    plot_hist(X_gaussianized_test, fimg)
+    # 2. rotated
     fimg = 'figs/hist2d_{}_mode{}{}_iter{}.png'.format(data_token, A_mode, '_{}'.format(args.K) if args.density_type=='GM' else '', i)
     fimg = os.path.join(args.save_dir, fimg)
     plot_hist(X, fimg)
@@ -212,6 +228,10 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         'sigma_min_test': sigma_min_test,
         'sigma_mean': sigma_mean,
         'sigma_mean_test': sigma_mean_test,
+        'log_det': log_det.item(),
+        'log_det_cur': log_det_cur.item(),
+        'log_det_test': log_det_test.item(),
+        'log_det_test_cur': log_det_test_cur.item(),
         'detA': torch.det(A).item(),
         })
 
@@ -286,18 +306,6 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
 
 
 if __name__ == '__main__':
-  # test()
-  # gen_data()
-
-  if os.path.exists(args.save_dir):
-    proceed = input('Dir exist: {} \n Do you want to proceed? (y/N)'.format(args.save_dir))
-    if 'y' not in proceed:
-      print('Exiting. Bye!')
-      exit(0)
-  os.makedirs(args.save_dir, exist_ok=True)
-  os.makedirs(os.path.join(args.save_dir, 'model'), exist_ok=True)
-  os.makedirs(os.path.join(args.save_dir, 'figs'), exist_ok=True)
-
   data_token = args.data
   mu_low, mu_up = -2, 2
   if data_token == 'GM':
