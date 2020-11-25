@@ -56,7 +56,7 @@ def init_GM_params(D, K, mu_low, mu_up):
   return pi, mu, sigma_sqr
 
 def update_EM(X, A, pi, mu, sigma_sqr,
-              threshold=5e-5, max_em_steps=30, n_gd_steps=20):
+              threshold=5e-5, max_em_steps=30):
 
   if type(X) is not torch.Tensor:
     X = torch.tensor(X)
@@ -73,7 +73,6 @@ def update_EM(X, A, pi, mu, sigma_sqr,
 
   while (not END(dsigma_sqr)) and niters < max_em_steps:
     niters += 1
-    A_prev, sigma_sqr_prev = A.clone(), sigma_sqr.clone()
 
     if TIME: e_start = time()
     Y, w, w_sumN, w_sumNK = E(X, A, pi, mu, sigma_sqr, Y=Y)
@@ -116,8 +115,10 @@ def update_A(A_mode, X):
         # avoid numerical instability
         U, ss, V = np.linalg.svd(Aorig)
         ss /= ss[0]
-        ss[ss < SINGULAR_SMALL] = SINGULAR_SMALL
-        Aorig = (U * ss).dot(V)
+        if ss[-1] < SINGULAR_SMALL:
+          Aorig += np.eye(Aorig.shape[0]) * SINGULAR_SMALL
+        # ss[ss < SINGULAR_SMALL] = SINGULAR_SMALL
+        # Aorig = (U * ss).dot(V)
 
         A = np.linalg.inv(Aorig)
         _, ss, _ = np.linalg.svd(A)
@@ -139,7 +140,10 @@ def E(X, A, pi, mu, sigma_sqr, Y=None):
   N, D = X.shape
   # E-step - update posterior counts
   if Y is None:
-    Y = A.matmul(X.T) # shape: D x N
+    if A is None:
+      Y = X.T.clone()
+    else:
+      Y = A.matmul(X.T) # shape: D x N
 
   diff_square = (Y.T.unsqueeze(-1) - mu)**2
   exponents = diff_square / sigma_sqr
@@ -158,7 +162,10 @@ def E(X, A, pi, mu, sigma_sqr, Y=None):
 def M(X, A, w, w_sumN, w_sumNK, Y=None):
   N, D = X.shape
   if Y is None:
-    Y = A.matmul(X.T) # D x N
+    if A is None:
+      Y = X.T.clone()
+    else:
+      Y = A.matmul(X.T) # shape: D x N
   pi = w_sumN / w_sumNK.view(-1, 1)
   mu = (Y.T.unsqueeze(-1) * w).sum(0) / w_sumN
   diff_square = (Y.T.unsqueeze(-1) - mu)**2
@@ -225,6 +232,7 @@ def gaussianize_1d(X, pi, mu, sigma_sqr, datapoints=None, bandwidth=None):
 
   N, D = X.shape
 
+  # pdb.set_trace()
   if bandwidth is None:
     # for calculations please see: https://www.overleaf.com/6125358376rgmjjgdsmdmm
     scaled = (X.unsqueeze(-1) - mu) / sigma_sqr**0.5
@@ -330,7 +338,7 @@ def logistic_inverse_normal_cdf_cp(x, bandwidth, datapoints, inverse_cdf_by_thre
     return ret_x, cdf_mask, [log_cdf_l, cdf_mask_left], [log_sf_l, cdf_mask_right]
 
 
-def compute_log_det_v2(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right,
+def compute_log_det(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right,
                     pi=None, mu=None, sigma_sqr=None,
                     datapoints=None, h=None):
   # NOTE: currently debugging this function.
@@ -347,16 +355,17 @@ def compute_log_det_v2(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_m
     Nd = datapoints.shape[0]
     log_pdfs = -(Y[None, ...] - datapoints[:, None, :]) / h[None, ...] \
                - torch.log(h[None, ...]) \
-               - 2 * F.softplus(-(x[None, ...] - datapoints[:, None, :]) / h[None, ...]) - np.log(Nd)
+               - 2 * F.softplus(-(Y[None, ...] - datapoints[:, None, :]) / h[None, ...]) - np.log(Nd)
     log_pdf = torch.logsumexp(log_pdfs, dim=0).double()
 
   # d phi^{-1} / dp
   p1 = 0.5 * np.log(2*np.pi) + 0.5 * X**2
 
-  log_det = (log_pdf + p1).sum() / N
+  # log_det = (log_pdf + p1).sum() / N
+  log_det = (log_pdf + p1).sum(-1)
   return log_det
 
-def compute_log_det(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right,
+def compute_log_det_v1(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right,
                     pi=None, mu=None, sigma_sqr=None,
                     datapoints=None, h=None):
   # NOTE: currently debugging this function.
@@ -386,19 +395,18 @@ def compute_log_det(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask
                                    - log_sf_l) * cdf_mask_right
   log_gaussian_derivative = log_gaussian_derivative_good + log_gaussian_derivative_left + log_gaussian_derivative_right
 
-  lgd_sum = log_gaussian_derivative.sum() / N
+  # lgd_sum = log_gaussian_derivative.sum(-1) / N
 
-  # pdb.set_trace()
-  # tmp1 = log_pdf.sum() / N
-  # tmp2 = log_gaussian_derivative.sum() / N
-  log_det = (log_pdf - log_gaussian_derivative).sum() / N
+  # log_det = (log_pdf - log_gaussian_derivative).sum() / N
+  log_det = (log_pdf - log_gaussian_derivative).sum(-1)
   return log_det
 
 def eval_NLL(X, log_det):
   N, D = X.shape
   # term for std normal
-  log_probs = - (X**2).sum() - 0.5*D *np.log(2*np.pi)
-  NLL = - log_probs / N - log_det
+  log_probs = - 0.5*(X**2) - 0.5*np.log(2*np.pi)
+  # NLL = - log_probs / N - log_det
+  NLL = - (log_probs.sum() + log_det.sum()) / N
   return NLL.item()
 
 def eval_KL(X):
