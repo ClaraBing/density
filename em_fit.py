@@ -15,8 +15,10 @@ import pdb
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--K', type=int, default=10)
-parser.add_argument('--n-pts', type=int, default=0)
-parser.add_argument('--n-steps', type=int, default=50)
+parser.add_argument('--n-pts', type=int, default=0,
+                    help="Number of samples used in training.")
+parser.add_argument('--n-steps', type=int, default=50,
+                    help="Number of layers / Gaussianization iterations.")
 parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
 parser.add_argument('--mode', type=str, default='GA',
