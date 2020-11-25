@@ -24,6 +24,7 @@ parser.add_argument('--mode', type=str, default='GA',
                     choices=['ICA', 'PCA', 'random', 'None', 'variational', 'Wasserstein'])
 parser.add_argument('--density-type', type=str, choices=['GM', 'KDE'])
 parser.add_argument('--inverse-cdf-by-thresh', type=int, default=0)
+parser.add_argument('--log-det-version', type=str, default='v1')
 parser.add_argument('--data', type=str, default='GM', choices=[
        # connected
        'normal', 'scaledNormal', 'rotatedNormal', 'ring',
@@ -82,6 +83,12 @@ VERBOSE = False
 TIME=args.time
 
 data_dir = './datasets/'
+
+if args.log_det_version == 'v1':
+  compute_log_det = compute_log_det_v1
+else:
+  compute_log_det = compute_log_det_v2
+
 
 def fit(X, Xtest, mu_low, mu_up, data_token=''):
   x = X
