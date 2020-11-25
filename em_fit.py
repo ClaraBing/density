@@ -23,6 +23,7 @@ parser.add_argument('--mode', type=str, default='GA',
                     choices=['ICA', 'PCA', 'random', 'None', 'variational', 'Wasserstein'])
 parser.add_argument('--g1d-first', type=int, default=0,
                     help="Whether to run a Gaussianization step before iterates. If 1, then this should be the same as RBIG.")
+parser.add_argument('--log-det-version', type=str, default='v1')
 parser.add_argument('--grad-mode', type=str, default='GA', choices=['GA', 'CF1', 'CF2', 'BTLS', 'perturb'],
                     help="Ways to update A in EM iterates.")
 parser.add_argument('--data', type=str, default='GM', choices=[
@@ -79,6 +80,11 @@ except Exception as e:
   print('Exception:', e)
   print('Not using wandb. \n\n')
   USE_WANDB = False
+
+if args.log_det_version == 'v1':
+  compute_log_det = compute_log_det_v1
+else:
+  compute_log_det = compute_log_det_v2
 
 def fit(X, Xtest, mu_low, mu_up, data_token=''):
   x = X
