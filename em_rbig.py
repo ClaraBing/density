@@ -108,7 +108,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   NLLs, NLLs_test = [], []
   KLs, KLs_test = [], []
 
-  log_det, log_det_test = 0, 0
+  log_det, log_det_test = to_tensor(np.zeros(X.shape[0])), to_tensor(np.zeros(Xtest.shape[0]))
 
   # get initial metrics
   # train
@@ -133,7 +133,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       em_start = time()
     if args.density_type == 'GM':
       pi, mu, sigma_sqr, ret_time = update_EM(X, None, pi, mu, sigma_sqr,
-                threshs[i], max_em_steps=args.n_em, n_gd_steps=args.n_gd)
+                threshs[i], max_em_steps=args.n_em)
     elif args.density_type == 'KDE':
       bandwidth = generate_bandwidth(X)
 
@@ -167,6 +167,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       log_det_test += log_det_test_cur
 
     A = update_A(A_mode, X_gaussianized)
+    # A = update_A(A_mode, X)
     log_det_A = torch.log(torch.abs(torch.det(A)))
     log_det += log_det_A
     log_det_test += log_det_A
@@ -228,10 +229,10 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         'sigma_min_test': sigma_min_test,
         'sigma_mean': sigma_mean,
         'sigma_mean_test': sigma_mean_test,
-        'log_det': log_det.item(),
-        'log_det_cur': log_det_cur.item(),
-        'log_det_test': log_det_test.item(),
-        'log_det_test_cur': log_det_test_cur.item(),
+        'log_det': log_det.mean().item(),
+        'log_det_cur': log_det_cur.mean().item(),
+        'log_det_test': log_det_test.mean().item(),
+        'log_det_test_cur': log_det_test_cur.mean().item(),
         'detA': torch.det(A).item(),
         })
 
