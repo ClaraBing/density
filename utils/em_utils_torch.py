@@ -439,13 +439,35 @@ def plot_hist(data, fimg):
   if type(data) is torch.Tensor:
     data = data.cpu().numpy()
 
-  plt.figure(figsize=[8,8])
-  plt.hist2d(data[:,0], data[:,1], bins=[100,100])
-  plt.xlim([-2.5, 2.5])
-  plt.ylim([-2.5, 2.5])
-  plt.savefig(fimg)
-  plt.clf()
-  plt.close()
+  if data.shape[1] == 2:
+    x, y = data[:, 0], data[:, 1]
+    plt.figure(figsize=[8,8])
+    plt.hist2d(x, y, bins=[100,100])
+    plt.xlim([-2.5, 2.5])
+    plt.ylim([-2.5, 2.5])
+    plt.savefig(fimg)
+    plt.clf()
+    plt.close()
+  else:
+    n_rows, n_cols = 3, 4
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(8, 8), sharex=True, sharey=True)
+    # check the projection at 10 random directions
+    for pi in range(12):
+      v1 = np.random.randn(data.shape[1])
+      v2 = np.random.randn(data.shape[1])
+      v2 -= v1.dot(v2) * v1
+      v1 /= np.linalg.norm(v1)
+      v2 /= np.linalg.norm(v2)
+      x = data.dot(v1)
+      y = data.dot(v2)
+
+      ri = pi // n_cols
+      ci = pi % n_cols
+      axes[ri, ci].hist2d(x, y, bins=[100,100])
+    plt.xlim([-2.5, 2.5])
+    plt.ylim([-2.5, 2.5])
+    plt.savefig(fimg)
+    plt.close()
 
 def to_tensor(data):
   if not isinstance(data, torch.Tensor):
