@@ -235,15 +235,16 @@ def gaussianize_1d(X, pi, mu, sigma_sqr, datapoints=None, bandwidth=None):
   # pdb.set_trace()
   if bandwidth is None:
     # for calculations please see: https://www.overleaf.com/6125358376rgmjjgdsmdmm
-    scaled = (X.unsqueeze(-1) - mu) / sigma_sqr**0.5
-    scaled = scaled.cpu()
-    normal_cdf = to_tensor(norm.cdf(scaled))
+    ##  pdb.set_trace()
+    z = (X.unsqueeze(-1) - mu) / sigma_sqr**0.5
+    z = z.cpu()
+    normal_cdf = to_tensor(norm.cdf(z))
     cdf = (pi * normal_cdf).sum(-1)
-    log_cdfs = to_tensor(norm.logcdf(scaled))
-    log_cdf = torch.logsumexp(torch.log(pi) + log_cdfs, dim=-1)
-    log_sfs = to_tensor(norm.logcdf(-1*scaled))
-    log_sf = torch.logsumexp(torch.log(pi) + log_sfs, dim=-1)
-  else:
+    log_cdfs = to_tensor(norm.logcdf(z))
+    log_cdf = torch.logsumexp(0.5*torch.log(2*pi) + 0.5*log_cdfs, dim=-1)
+    log_sfs = to_tensor(norm.logcdf(-1*z))
+    log_sf = torch.logsumexp(0.5*torch.log(2*pi) + 0.5*log_sfs, dim=-1)
+  elif False: # not used: KDE uses the routine in rbig_utils
     mask_bound = 0.5e-7
     cdf = logistic_kernel_cdf(x, datapoints, h=bandwidth)
     log_cdf = logistic_kernel_log_cdf(x, datapoints, h=bandwidth)  # log(CDF)
@@ -277,7 +278,7 @@ def gaussianize_1d(X, pi, mu, sigma_sqr, datapoints=None, bandwidth=None):
     exit(0)
     pdb.set_trace()
 
-  cdf2 = norm.cdf(scaled)
+  cdf2 = norm.cdf(z)
   # remove outliers 
   cdf2[cdf2<EPS] = EPS
   cdf2[cdf2>1-EPS] = 1 - EPS
@@ -338,7 +339,7 @@ def logistic_inverse_normal_cdf_cp(x, bandwidth, datapoints, inverse_cdf_by_thre
     return ret_x, cdf_mask, [log_cdf_l, cdf_mask_left], [log_sf_l, cdf_mask_right]
 
 
-def compute_log_det(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right,
+def compute_log_det_v2(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right,
                     pi=None, mu=None, sigma_sqr=None,
                     datapoints=None, h=None):
   # NOTE: currently debugging this function.
@@ -349,7 +350,9 @@ def compute_log_det(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask
   # dp / dy
   if h is None:
     scaled = (Y.unsqueeze(-1) - mu)**2 / sigma_sqr
-    log_pdfs = - 0.5 * scaled + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr**0.75)
+    # log_pdfs = - 0.5 * scaled + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr**0.75)
+    log_pdfs = - 0.5 * scaled + torch.log(pi / (2*np.pi * sigma_sqr)**(-0.5)
+    pdb.set_trace()
     log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
   else:
     Nd = datapoints.shape[0]
