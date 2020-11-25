@@ -130,7 +130,9 @@ def update_A(A_mode, X):
       print('ICA failed. Use random orthonormal matrix.')
       A = to_tensor(ortho_group.rvs(D))
   elif A_mode == 'variational':
-    A = to_tensor(variational_KL(X, 100))
+    A = to_tensor(variational_KL(X, 1000))
+    _, ss, _ = np.linalg.svd(A)
+    A = to_tensor(A / ss[0])
   elif A_mode == 'Wasserstein':
     raise NotImplementedError("Wasserstein")
   return A
