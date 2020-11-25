@@ -76,7 +76,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
       DATA = DATA.type(DTYPE).to(device)
       data_anchors = [DATA]
       bandwidths = []
-      vectors = []
+      # vectors = []
       nll_layer = [[] for _ in range(n_layer)]
       bpd_layer = [[] for _ in range(n_layer)]
       log_prob_layer = [[] for _ in range(n_layer)]
@@ -127,8 +127,8 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
                   rotation_matrices.append(rotation_matrix.to(device))
                   if TIME:
                     times['gen_rotation'] += time() - start,
-                  vector = 2 * (torch.rand((1, data.shape[-1])) - 0.5).to(device)
-                  vectors.append(vector)
+                  # vector = 2 * (torch.rand((1, data.shape[-1])) - 0.5).to(device)
+                  # vectors.append(vector)
 
               if data.dtype != bandwidth.dtype:
                 bandwidth = bandwidth.type(data.dtype)
@@ -141,10 +141,11 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
               if TIME:
                 times['inverse_cdf'] += time() - start,
                 start = time()
-              log_det += compute_log_det(data, inverse_l, data_anchors[prev_l], cdf_mask,
+              log_det_cur = compute_log_det(data, inverse_l, data_anchors[prev_l], cdf_mask,
                                                log_cdf_l, cdf_mask_left, log_sf_l, cdf_mask_right, h=bandwidth)
               # TODO: should I add this? 
-              log_det += torch.log(torch.abs(torch.det(rotation_matrices[prev_l])))
+              log_det_cur += torch.log(torch.abs(torch.det(rotation_matrices[prev_l])))
+              log_det += log_det_cur
               if TIME:
                 times['log_det'] += time() - start,
               # rotation
@@ -168,15 +169,16 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
                       inverse_data, cdf_mask_train, [log_cdf_l_train, cdf_mask_left_train], [log_sf_l_train, cdf_mask_right_train] = logistic_inverse_normal_cdf(cur_data_batch, bandwidth=bandwidth,
                                                                        datapoints=data_anchors[prev_l], inverse_cdf_by_thresh=args.inverse_cdf_by_thresh)
                       if b == 0:
-                        log_det_train += compute_log_det(cur_data_batch, inverse_data, data_anchors[prev_l], cdf_mask_train,
+                        log_det_train_cur = compute_log_det(cur_data_batch, inverse_data, data_anchors[prev_l], cdf_mask_train,
                                                          log_cdf_l_train, cdf_mask_left_train, log_sf_l_train, cdf_mask_right_train, h=bandwidth)
-                        log_det_train += torch.log(torch.abs(torch.det(rotation_matrices[prev_l])))
+                        log_det_train_cur += torch.log(torch.abs(torch.det(rotation_matrices[prev_l])))
+                        log_det_train += log_det_train_cur
                         train_loss_curr_layer, train_log_prob_curr_layer = flow_loss(cur_data_batch, log_det_train)
                         nll_layer_train += train_loss_curr_layer.item(),
                         if USE_WANDB:
                           wandb.log({
                             'NLL':train_loss_curr_layer.item(),
-                            'KL': train_log_prob_curr_layer.item()
+                            'KL': -train_log_prob_curr_layer.item()
                           })
 
                       if TIME:
@@ -206,6 +208,10 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
                   'sigma_min_test': sigma_min_test,
                   'sigma_mean': sigma_mean,
                   'sigma_mean_test': sigma_mean_test,
+                  'log_det_test': log_det.mean().item(),
+                  'log_det': log_det_train.mean().item(),
+                  'log_det_test_cur': log_det_cur.mean().item(),
+                  'log_det_cur': log_det_train_cur.mean().item(),
                   'detA': torch.det(rotation_matrices[prev_l]).item()
                 })
               test_bpd_curr_layer = (val_loss_curr_layer.item() * data.shape[0] - log_det_logit) * (
@@ -358,7 +364,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
 if __name__ == '__main__':
   try:
     total_datapoints = args.bt # 10000
-    process_size = 100
+    process_size = args.bt
     n_layer = args.n_layer
     if not SILENT:
       print("Total layer {}".format(n_layer))
