@@ -4,6 +4,7 @@ import torch.optim as optim
 import torch.nn as nn
 
 DTYPE = torch.FloatTensor
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def to_tensor(data):
     return torch.tensor(data).type(DTYPE).to(device)
@@ -23,7 +24,7 @@ class variationalNet(torch.nn.Module):
         out = self.input(out)
         out = self.relu(out)
         out = self.output(out)
-        out = self.make_positive(out, torch.zeros(out.shape))
+        out = self.make_positive(out, torch.zeros(out.shape).to(device))
         return out
 
     def parameter_count(self):
@@ -43,7 +44,7 @@ def variational_KL(X, n_epochs, n=1000, num_hidden_nodes=10, det_lambda=0.1):
     cov = np.eye(D,D)
     Z = to_tensor(np.random.multivariate_normal(mean, cov, n))
     g_function = variationalNet(num_hidden_nodes).to(device)
-    A = torch.randn((D,D), requires_grad=True)
+    A = torch.randn((D,D), requires_grad=True, device=device)
     torch.nn.init.orthogonal_(A)
     optimizer = optim.SGD([
                 {'params': g_function.parameters()},
@@ -62,7 +63,7 @@ def variational_KL(X, n_epochs, n=1000, num_hidden_nodes=10, det_lambda=0.1):
         y_Z = torch.flatten(A.T.matmul(Z.T)).view(n*D,1)
         g_y_Z = g_function(y_Z)
         sum_loss += torch.sum(g_y_Z)/n
-        sum_loss -= det_lambda * torch.log(torch.absolute(torch.det(A)))
+        sum_loss -= det_lambda * torch.log(torch.abs(torch.det(A)))
         sum_loss.backward()
         optimizer.step()
         print(i, sum_loss.item())
