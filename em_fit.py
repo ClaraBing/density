@@ -46,17 +46,22 @@ args = parser.parse_args()
 from utils.em_utils_torch import *
 # from rbig_util import *
 
-ga_token = ''
-if args.mode in ['ICA', 'PCA', 'random']:
-  ga_token = '_'+args.grad_mode
-else:
-  raise NotImplementedError("Not currently support: args.mode={}. Sorry! > <".format(args.mode))
-args.save_dir = '{}/mode{}_K{}_iter{}_em{}_gd{}{}'.format(
-      args.data, args.mode, args.K, args.n_steps, args.n_em, args.n_gd, ga_token)
+SAVE_ROOT = 'runs_gaussianization'
+SAVE_NPY = False
+VERBOSE = False
+
+TIME=args.time
+
+data_dir = './datasets/'
+
+d_token = 'em{}_K{}'.format(args.n_em, args.K)
+args.save_dir = '{}/mode{}_iter{}_{}'.format(
+      args.data, args.mode, args.n_steps, d_token)
 if args.n_pts:
   args.save_dir += '_nPts{}'.format(args.n_pts)
 if args.save_token:
   args.save_dir += '_' + args.save_token
+args.save_dir = os.path.join(SAVE_ROOT, args.save_dir)
 if os.path.exists(args.save_dir):
   proceed = input('Dir exist: {} \n Do you want to proceed? (y/N)'.format(args.save_dir))
   if 'y' not in proceed:
@@ -68,21 +73,12 @@ os.makedirs(os.path.join(args.save_dir, 'figs'), exist_ok=True)
 
 try:
   import wandb
-  wandb.init(project='density', name=args.save_dir, config=args)
+  wandb.init(project='density', name=os.path.basename(args.save_dir), config=args)
   USE_WANDB = True
 except Exception as e:
   print('Exception:', e)
   print('Not using wandb. \n\n')
   USE_WANDB = False
-
-SAVE_ROOT = 'runs_gaussianization'
-SAVE_NPY = False
-VERBOSE = False
-
-TIME=args.time
-
-data_dir = './datasets/'
-args.save_dir = os.path.join(SAVE_ROOT, args.save_dir)
 
 def fit(X, Xtest, mu_low, mu_up, data_token=''):
   x = X
@@ -107,7 +103,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
   NLLs, NLLs_test = [], []
   KLs, KLs_test = [], []
 
-  log_det, log_det_test = 0, 0
+  log_det, log_det_test = to_tensor(np.zeros(X.shape[0])), to_tensor(np.zeros(Xtest.shape[0]))
 
   # get initial metrics
   # train
@@ -136,7 +132,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       em_start = time()
     A = update_A(A_mode, X)
     pi, mu, sigma_sqr, ret_time = update_EM(X, A, pi, mu, sigma_sqr,
-              threshs[i], max_em_steps=args.n_em, n_gd_steps=args.n_gd)
+              threshs[i], max_em_steps=args.n_em)
 
     if TIME:
       for key in ret_time:
