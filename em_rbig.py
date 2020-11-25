@@ -23,7 +23,7 @@ parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--mode', type=str, default='GA',
                     choices=['ICA', 'PCA', 'random', 'None', 'variational', 'Wasserstein'])
 parser.add_argument('--density-type', type=str, choices=['GM', 'KDE'])
-parser.add_argument('--inverse-cdf-by-thresh', type=int)
+parser.add_argument('--inverse-cdf-by-thresh', type=int, default=0)
 parser.add_argument('--data', type=str, default='GM', choices=[
        # connected
        'normal', 'scaledNormal', 'rotatedNormal', 'ring',

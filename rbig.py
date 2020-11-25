@@ -364,7 +364,7 @@ def main(DATA, lambd, train_loader, val_loader, log_batch=False, out_dir='output
 if __name__ == '__main__':
   try:
     total_datapoints = args.bt # 10000
-    process_size = args.bt
+    process_size = args.bt_test
     n_layer = args.n_layer
     if not SILENT:
       print("Total layer {}".format(n_layer))
