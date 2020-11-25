@@ -352,8 +352,7 @@ def compute_log_det_v2(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_m
   # dp / dy
   if h is None:
     scaled = (Y.unsqueeze(-1) - mu)**2 / sigma_sqr
-    # log_pdfs = - 0.5 * scaled + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr**0.75)
-    log_pdfs = - 0.5 * scaled + torch.log(pi / (2*np.pi * sigma_sqr)**(-0.5)
+    log_pdfs = - 0.5 * scaled + torch.log(pi / (2*np.pi * sigma_sqr)**(0.5)
     pdb.set_trace()
     log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
   else:
@@ -366,7 +365,6 @@ def compute_log_det_v2(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_m
   # d phi^{-1} / dp
   p1 = 0.5 * np.log(2*np.pi) + 0.5 * X**2
 
-  # log_det = (log_pdf + p1).sum() / N
   log_det = (log_pdf + p1).sum(-1)
   return log_det
 
@@ -379,8 +377,7 @@ def compute_log_det_v1(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_m
   N, D = X.shape
   if h is None and pi is not None:
     scaled = (Y.unsqueeze(-1) - mu)**2 / sigma_sqr
-    # log_pdfs = - 0.5 * scaled + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr**0.75)
-    log_pdfs = - 0.5 * scaled + torch.log(pi / (2*np.pi * sigma_sqr)**(-0.5)
+    log_pdfs = - 0.5 * scaled + torch.log(pi / (2*np.pi * sigma_sqr)**(0.5)
     log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
   else:
     Nd = datapoints.shape[0]
