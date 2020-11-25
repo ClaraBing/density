@@ -24,7 +24,7 @@ parser.add_argument('--n-gd', type=int, default=20)
 parser.add_argument('--mode', type=str, default='GA',
                     choices=['ICA', 'PCA', 'random', 'None', 'variational', 'Wasserstein'])
 parser.add_argument('--density-type', type=str, choices=['GM', 'KDE'])
-parser.add_argument('--inverse-cdf-by-thresh', type=int)
+parser.add_argument('--inverse-cdf-by-thresh', type=int, default=0)
 parser.add_argument('--data', type=str, default='GM', choices=[
        # connected
        'normal', 'scaledNormal', 'rotatedNormal', 'ring',
@@ -153,6 +153,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
                                  datapoints=X[:args.n_anchors], h=bandwidth)
 
     A = update_A(A_mode, X_gaussianized)
+    # A = update_A(A_mode, X)
     log_det_A = torch.log(torch.abs(torch.det(A)))
     log_det += log_det_A
     log_det_test += log_det_A
