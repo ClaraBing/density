@@ -232,10 +232,8 @@ def gaussianize_1d(X, pi, mu, sigma_sqr, datapoints=None, bandwidth=None):
 
   N, D = X.shape
 
-  # pdb.set_trace()
   if bandwidth is None:
     # for calculations please see: https://www.overleaf.com/6125358376rgmjjgdsmdmm
-    ##  pdb.set_trace()
     z = (X.unsqueeze(-1) - mu) / sigma_sqr**0.5
     z = z.cpu()
     normal_cdf = to_tensor(norm.cdf(z))
@@ -328,8 +326,6 @@ def logistic_inverse_normal_cdf_cp(x, bandwidth, datapoints, inverse_cdf_by_thre
       # remove outliers 
       cdf_l[cdf_l<mask_bound] = mask_bound
       cdf_l[cdf_l>1-mask_bound] = 1 - mask_bound
-      # pdb.set_trace()
-      # new_distr = cdf_l.sum(-1)
       new_X = norm.ppf(cdf_l.cpu())
       new_X = to_tensor(new_X)
       ret_x = new_X
@@ -350,9 +346,7 @@ def compute_log_det_v2(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_m
   # dp / dy
   if h is None:
     scaled = (Y.unsqueeze(-1) - mu)**2 / sigma_sqr
-    # log_pdfs = - 0.5 * scaled + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr**0.75)
-    log_pdfs = - 0.5 * scaled + torch.log(pi / (2*np.pi * sigma_sqr)**(-0.5)
-    pdb.set_trace()
+    log_pdfs = - 0.5 * scaled + torch.log(pi / (2*np.pi * sigma_sqr)**(0.5))
     log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
   else:
     Nd = datapoints.shape[0]
@@ -364,7 +358,6 @@ def compute_log_det_v2(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_m
   # d phi^{-1} / dp
   p1 = 0.5 * np.log(2*np.pi) + 0.5 * X**2
 
-  # log_det = (log_pdf + p1).sum() / N
   log_det = (log_pdf + p1).sum(-1)
   return log_det
 
@@ -377,8 +370,7 @@ def compute_log_det_v1(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_m
   N, D = X.shape
   if h is None and pi is not None:
     scaled = (Y.unsqueeze(-1) - mu)**2 / sigma_sqr
-    # log_pdfs = - 0.5 * scaled + torch.log((2*np.pi)**(-0.5) * pi / sigma_sqr**0.75)
-    log_pdfs = - 0.5 * scaled + torch.log(pi / (2*np.pi * sigma_sqr)**(-0.5)
+    log_pdfs = - 0.5 * scaled + torch.log(pi / (2*np.pi * sigma_sqr)**(0.5))
     log_pdf = torch.logsumexp(log_pdfs, dim=-1).double()
   else:
     Nd = datapoints.shape[0]
@@ -389,7 +381,6 @@ def compute_log_det_v1(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_m
 
   # TODO: is this correct?
   log_gaussian_derivative_good = dists.Normal(0, 1).log_prob(X) * cdf_mask
-  # log_gaussian_derivative_good = dists.Normal(0, 1).log_prob(Y) * cdf_mask
 
   cdf_l_bad_right_log = log_sf_l * cdf_mask_right + (-1.) * (1. - cdf_mask_right)
   cdf_l_bad_left_log = log_cdf_l * cdf_mask_left + (-1.) * (1. - cdf_mask_left)
