@@ -57,6 +57,14 @@ if args.n_pts:
   args.save_dir += '_nPts{}'.format(args.n_pts)
 if args.save_token:
   args.save_dir += '_' + args.save_token
+if os.path.exists(args.save_dir):
+  proceed = input('Dir exist: {} \n Do you want to proceed? (y/N)'.format(args.save_dir))
+  if 'y' not in proceed:
+    print('Exiting. Bye!')
+    exit(0)
+os.makedirs(args.save_dir, exist_ok=True)
+os.makedirs(os.path.join(args.save_dir, 'model'), exist_ok=True)
+os.makedirs(os.path.join(args.save_dir, 'figs'), exist_ok=True)
 
 try:
   import wandb
@@ -285,18 +293,6 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
 
 
 if __name__ == '__main__':
-  # test()
-  # gen_data()
-
-  if os.path.exists(args.save_dir):
-    proceed = input('Dir exist: {} \n Do you want to proceed? (y/N)'.format(args.save_dir))
-    if 'y' not in proceed:
-      print('Exiting. Bye!')
-      exit(0)
-  os.makedirs(args.save_dir, exist_ok=True)
-  os.makedirs(os.path.join(args.save_dir, 'model'), exist_ok=True)
-  os.makedirs(os.path.join(args.save_dir, 'figs'), exist_ok=True)
-
   data_token = args.data
   mu_low, mu_up = -2, 2
   if data_token == 'GM':
