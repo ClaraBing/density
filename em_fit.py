@@ -360,8 +360,8 @@ if __name__ == '__main__':
     fdata_val = os.path.join(power_dir, 'val_normed.npy')
   elif data_token == 'gas':
     gas_dir = 'GAS/'
-    fdata = os.path.join(gas_dir, 'ethylene_CO_trainSmall_normed.npy')
-    fdata_val = os.path.join(gas_dir, 'ethylene_CO_valSmall_normed.npy')
+    fdata = os.path.join(gas_dir, 'ethylene_CO_train_normed.npy')
+    fdata_val = os.path.join(gas_dir, 'ethylene_CO_val_normed.npy')
   
   data_token += args.save_token
 
