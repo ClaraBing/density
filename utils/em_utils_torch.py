@@ -13,17 +13,21 @@ from sklearn.exceptions import ConvergenceWarning
 simplefilter("ignore", category=ConvergenceWarning)
 
 from time import time
+import cProfile
 
 # local imports
 from data.dataset_mixture import GaussianMixture
 from utils.rbig_util import logistic_kernel_cdf, logistic_kernel_log_cdf, logistic_kernel_log_sf, logistic_inverse_normal_cdf
 from utils.variational_util import variational_KL
+from utils.numerical import ndtri
 
 import pdb
 
+SCIPY = 0
 VERBOSE = 0
 TIME = 1
 CHECK_OBJ = 1
+PROFILE = 0
 
 SMALL = 1e-10
 EPS = 5e-8
@@ -128,7 +132,7 @@ def update_A(A_mode, X):
       print('ICA failed. Use random orthonormal matrix.')
       A = to_tensor(ortho_group.rvs(D))
   elif A_mode == 'variational':
-    A = to_tensor(variational_KL(X, 1000))
+    A = variational_KL(X, 1000).cpu()
     _, ss, _ = np.linalg.svd(A)
     A = to_tensor(A / ss[0])
   elif A_mode == 'Wasserstein':
@@ -231,17 +235,39 @@ def gaussianize_1d(X, pi, mu, sigma_sqr, datapoints=None, bandwidth=None):
   mask_bound = 5e-8
 
   N, D = X.shape
+  _, K = mu.shape
 
   if bandwidth is None:
     # for calculations please see: https://www.overleaf.com/6125358376rgmjjgdsmdmm
-    z = (X.unsqueeze(-1) - mu) / sigma_sqr**0.5
-    z = z.cpu()
-    normal_cdf = to_tensor(norm.cdf(z))
-    cdf = (pi * normal_cdf).sum(-1)
-    log_cdfs = to_tensor(norm.logcdf(z))
-    log_cdf = torch.logsumexp(0.5*torch.log(2*pi) + 0.5*log_cdfs, dim=-1)
-    log_sfs = to_tensor(norm.logcdf(-1*z))
-    log_sf = torch.logsumexp(0.5*torch.log(2*pi) + 0.5*log_sfs, dim=-1)
+    if SCIPY:
+      z = (X.unsqueeze(-1) - mu) / sigma_sqr**0.5
+      z = z.cpu()
+      normal_cdf = to_tensor(norm.cdf(z))
+      cdf = (pi * normal_cdf).sum(-1)
+      log_cdfs = to_tensor(norm.logcdf(z))
+      log_cdf = torch.logsumexp(0.5*torch.log(2*pi) + 0.5*log_cdfs, dim=-1)
+    else:
+      # faster 
+      z = (X.unsqueeze(-1) - mu) / sigma_sqr**0.5
+      comp = dists.Normal(0, 1)
+      normal_cdfd = comp.cdf(z)
+      normal_cdfd[normal_cdfd>1-EPS] = 1-EPS
+      normal_cdfd[normal_cdfd<EPS] = EPS
+      cdf = (pi.expand(len(normal_cdfd), pi.shape[0], pi.shape[1]) * normal_cdfd).sum(-1)
+      log_cdfsd = torch.log(normal_cdfd)
+      log_cdf = torch.logsumexp(0.5*torch.log(2*pi) + 0.5*log_cdfsd, dim=-1)
+
+    if SCIPY:
+      log_sfs = to_tensor(norm.logcdf(-1*z.cpu()))
+      log_sf = torch.logsumexp(0.5*torch.log(2*pi) + 0.5*log_sfs, dim=-1)
+    else:
+      # faster
+      normal_sf = comp.cdf(-z)
+      EPS_CDF = 1e-40
+      normal_sf[normal_sf<EPS_CDF] = EPS_CDF
+      log_sfsd = torch.log(normal_sf)
+      log_sf = torch.logsumexp(0.5*torch.log(2*pi) + 0.5*log_sfsd, dim=-1)
+
   elif False: # not used: KDE uses the routine in rbig_utils
     mask_bound = 0.5e-7
     cdf = logistic_kernel_cdf(x, datapoints, h=bandwidth)
@@ -276,17 +302,16 @@ def gaussianize_1d(X, pi, mu, sigma_sqr, datapoints=None, bandwidth=None):
     exit(0)
     pdb.set_trace()
 
-  cdf2 = norm.cdf(z)
-  # remove outliers 
-  cdf2[cdf2<EPS] = EPS
-  cdf2[cdf2>1-EPS] = 1 - EPS
-  new_distr = (pi.cpu().numpy() * cdf2).sum(-1)
-  new_X = norm.ppf(new_distr)
-  new_X = to_tensor(new_X)
-
-  if False and torch.norm(new_X - inverse_cdf) > 10:
-    print('Gaussianization 1D mismatch.')
-    pdb.set_trace()
+  if SCIPY:
+    cdf2 = norm.cdf(z.cpu())
+    # remove outliers 
+    cdf2[cdf2<EPS] = EPS
+    cdf2[cdf2>1-EPS] = 1 - EPS
+    new_distr = (pi.cpu().numpy() * cdf2).sum(-1)
+    new_X = norm.ppf(new_distr)
+    new_X = to_tensor(new_X)
+  else:
+    new_X = ndtri(cdf)
 
   return new_X, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right]
 
@@ -367,6 +392,11 @@ def compute_log_det_v1(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_m
   # NOTE: currently debugging this function.
   # Y should be rotated & before Gaussianization,
   # X should be Gaussiznied.
+  
+  pr = cProfile.Profile()
+  if PROFILE:
+    pr.enable()
+
   N, D = X.shape
   if h is None and pi is not None:
     scaled = (Y.unsqueeze(-1) - mu)**2 / sigma_sqr
@@ -390,6 +420,7 @@ def compute_log_det_v1(X, Y, cdf_mask, log_cdf_l, cdf_mask_left, log_sf_l, cdf_m
   log_gaussian_derivative = log_gaussian_derivative_good + log_gaussian_derivative_left + log_gaussian_derivative_right
 
   log_det = (log_pdf - log_gaussian_derivative).sum(-1)
+  pr.disable()
   return log_det
 
 def eval_NLL(X, log_det):
