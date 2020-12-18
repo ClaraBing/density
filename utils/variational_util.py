@@ -63,8 +63,14 @@ def variational_KL(X, n_epochs, n=1000, num_hidden_nodes=10, det_lambda=0.1):
         y_Z = torch.flatten(A.T.matmul(Z.T)).view(n*D,1)
         g_y_Z = g_function(y_Z)
         sum_loss += torch.sum(g_y_Z)/n
+        if i % 100 == 0:
+            det_lambda *= 0.5
         sum_loss -= det_lambda * torch.log(torch.abs(torch.det(A)))
         sum_loss.backward()
         optimizer.step()
         print(i, sum_loss.item())
+        with torch.no_grad():
+            _, ss, _ = np.linalg.svd(A.detach().cpu())
+            if ss[0] > 1:
+                A /= ss[0]
     return A.detach()
