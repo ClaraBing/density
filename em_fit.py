@@ -33,25 +33,34 @@ parser.add_argument('--data', type=str, default='GM', choices=[
        'GM', 'GM_scale1', 'GM_scale2', 'GMn2', 'concentric',
        # UCI
        'gas16_co', 'gas16_methane', 'gas8_co', 'gas8_co_normed',
-       'miniboone', 'hepmass', 'gas', 'power',
+       'miniboone', 'hepmass', 'gas', 'gasSmall', 'power',
        # images,
        'MNIST',
        ])
 parser.add_argument('--pca-dim', type=int, default=0,
                    help="PCA dimension for high-dim data e.g. MNIST.")
+parser.add_argument('--overwrite', type=int, default=0,
+                   help="Whether to overwrite an existing directory.")
 parser.add_argument('--save-token', type=str, default='')
 parser.add_argument('--save-dir', type=str)
 parser.add_argument('--time', type=int, default=0)
 args = parser.parse_args()
 
+from utils.misc import *
 from utils.em_utils_torch import *
 # from rbig_util import *
 
 SAVE_ROOT = 'runs_gaussianization'
+SAVE_FIG = False
 SAVE_NPY = False
 VERBOSE = False
 
 TIME=args.time
+PROFILE = 1
+if PROFILE:
+  import cProfile
+  pr = cProfile.Profile()
+
 
 data_dir = './datasets/'
 
@@ -63,7 +72,7 @@ if args.n_pts:
 if args.save_token:
   args.save_dir += '_' + args.save_token
 args.save_dir = os.path.join(SAVE_ROOT, args.save_dir)
-if os.path.exists(args.save_dir):
+if not args.overwrite and os.path.exists(args.save_dir):
   proceed = input('Dir exist: {} \n Do you want to proceed? (y/N)'.format(args.save_dir))
   if 'y' not in proceed:
     print('Exiting. Bye!')
@@ -88,13 +97,15 @@ else:
 
 def fit(X, Xtest, mu_low, mu_up, data_token=''):
   x = X
-  fimg = 'figs/hist2d_{}_init.png'.format(data_token)
-  fimg = os.path.join(args.save_dir, fimg)
-  plot_hist(x, fimg)
+  if SAVE_FIG:
+    fimg = 'figs/hist2d_{}_init.png'.format(data_token)
+    fimg = os.path.join(args.save_dir, fimg)
+    plot_hist(x, fimg)
   x = Xtest
-  fimg = 'figs/hist2d_test_{}_init.png'.format(data_token)
-  fimg = os.path.join(args.save_dir, fimg)
-  plot_hist(x, fimg)
+  if SAVE_FIG:
+    fimg = 'figs/hist2d_test_{}_init.png'.format(data_token)
+    fimg = os.path.join(args.save_dir, fimg)
+    plot_hist(x, fimg)
 
   X = to_tensor(X)
   Xtest = to_tensor(Xtest)
@@ -130,6 +141,8 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     avg_time = {'EM':[], 'NLL':[], 'G1D':[], 'save':[], 'iter':[]}
     default_keys = list(avg_time.keys())
   # Iterating over the layers
+  if PROFILE:
+    pr.enable()
   for i in range(n_steps):
     iter_start = time()
     print('iteration {} - data={} - mode={}{}'.format(i, args.data, args.mode,
@@ -157,12 +170,13 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       print('mu: mean={:.3e}/ std={:.3e}'.format(mu.mean(), mu.std()))
       print('sigma_sqr: min={:.3e} / mean={:.3e}/ std={:.3e}'.format(sigma_sqr.min(), sigma_sqr.mean(), sigma_sqr.std()))
 
-    fimg = 'figs/hist2d_{}_mode{}_K{}_iter{}_Y.png'.format(data_token, A_mode, K, i)
-    fimg = os.path.join(args.save_dir, fimg)
-    plot_hist(Y, fimg)
-    fimg = 'figs/hist2d_test_{}_mode{}_K{}_iter{}_Y.png'.format(data_token, A_mode, K, i)
-    fimg = os.path.join(args.save_dir, fimg)
-    plot_hist(Ytest, fimg)
+    if SAVE_FIG or i % 50 == 0:
+      fimg = 'figs/hist2d_{}_mode{}_K{}_iter{}_Y.png'.format(data_token, A_mode, K, i)
+      fimg = os.path.join(args.save_dir, fimg)
+      plot_hist(Y, fimg)
+      fimg = 'figs/hist2d_test_{}_mode{}_K{}_iter{}_Y.png'.format(data_token, A_mode, K, i)
+      fimg = os.path.join(args.save_dir, fimg)
+      plot_hist(Ytest, fimg)
 
     if TIME: g1d_start = time()
     prevX = X.clone()
@@ -183,23 +197,25 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     diff_from_I, sigma_max, sigma_min, sigma_mean = check_cov(X)
 
     x = X
-    fimg = 'figs/hist2d_{}_mode{}_K{}_iter{}.png'.format(data_token, A_mode, K, i)
-    fimg = os.path.join(args.save_dir, fimg)
-    if torch.isnan(x.max()) or torch.isnan(x.min()):
-      print('X: NaN')
-      pdb.set_trace()
-    plot_hist(x, fimg)
+    if SAVE_FIG or i % 50 == 0:
+      fimg = 'figs/hist2d_{}_mode{}_K{}_iter{}.png'.format(data_token, A_mode, K, i)
+      fimg = os.path.join(args.save_dir, fimg)
+      if torch.isnan(x.max()) or torch.isnan(x.min()):
+        print('X: NaN')
+        pdb.set_trace()
+      plot_hist(x, fimg)
 
     # check on test data
     Xtest, cdf_mask_test, [log_cdf_test, cdf_mask_left_test], [log_sf_test, cdf_mask_right_test] = gaussianize_1d(Ytest, pi, mu, sigma_sqr)
     diff_from_I_test, sigma_max_test, sigma_min_test, sigma_mean_test = check_cov(Xtest)
     x = Xtest
-    fimg = 'figs/hist2d_test_{}_mode{}_K{}_iter{}.png'.format(data_token, A_mode, K, i)
-    fimg = os.path.join(args.save_dir, fimg)
-    if torch.isnan(x.max()) or torch.isnan(x.min()):
-      print('Xtest: NaN')
-      pdb.set_trace()
-    plot_hist(x, fimg)
+    if SAVE_FIG or i % 50 == 0:
+      fimg = 'figs/hist2d_test_{}_mode{}_K{}_iter{}.png'.format(data_token, A_mode, K, i)
+      fimg = os.path.join(args.save_dir, fimg)
+      if torch.isnan(x.max()) or torch.isnan(x.min()):
+        print('Xtest: NaN')
+        pdb.set_trace()
+      plot_hist(x, fimg)
     log_det_test += compute_log_det(Xtest, Ytest, cdf_mask_test, log_cdf_test, cdf_mask_left_test, log_sf_test, cdf_mask_right_test,
                                     pi=pi, mu=mu, sigma_sqr=sigma_sqr)
     log_det_test += torch.log(torch.abs(torch.det(A)))
@@ -241,18 +257,19 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         np.save(os.path.join(args.save_dir, 'NLLs_test.npy'), np.array(NLLs_test))
         np.save(os.path.join(args.save_dir, 'KLs.npy'), np.array(KLs))
         np.save(os.path.join(args.save_dir, 'KLs_test.npy'), np.array(KLs_test))
-      plt.plot(np.array(NLLs))
-      plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL_log.png'))
-      plt.close()
-      plt.plot(np.array(NLLs_test))
-      plt.savefig(os.path.join(args.save_dir, 'figs', 'NLLtest_log.png'))
-      plt.close()
-      plt.plot(np.array(KLs))
-      plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log.png'))
-      plt.close()
-      plt.plot(np.array(KLs_test))
-      plt.savefig(os.path.join(args.save_dir, 'figs', 'KLtest_log.png'))
-      plt.close()
+      if SAVE_FIG or i % 50 == 0:
+        plt.plot(np.array(NLLs))
+        plt.savefig(os.path.join(args.save_dir, 'figs', 'NLL_log.png'))
+        plt.close()
+        plt.plot(np.array(NLLs_test))
+        plt.savefig(os.path.join(args.save_dir, 'figs', 'NLLtest_log.png'))
+        plt.close()
+        plt.plot(np.array(KLs))
+        plt.savefig(os.path.join(args.save_dir, 'figs', 'KL_log.png'))
+        plt.close()
+        plt.plot(np.array(KLs_test))
+        plt.savefig(os.path.join(args.save_dir, 'figs', 'KLtest_log.png'))
+        plt.close()
 
     if TIME:
       avg_time['iter'] += time() - iter_start,
@@ -270,6 +287,10 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     ftime = os.path.join(args.save_dir, 'time.pkl')
     with open(ftime, 'wb') as handle:
       pickle.dump(avg_time, handle)
+  if PROFILE:
+    pr.disable()
+    print_profile_stats(pr, 'profile_{}.txt'.format(args.save_token))
+
   # train
   NLLs = np.array(NLLs)
   np.save(os.path.join(args.save_dir, 'NLLs.npy'), KLs)
@@ -362,6 +383,10 @@ if __name__ == '__main__':
     gas_dir = 'GAS/'
     fdata = os.path.join(gas_dir, 'ethylene_CO_train_normed.npy')
     fdata_val = os.path.join(gas_dir, 'ethylene_CO_val_normed.npy')
+  elif data_token == 'gasSmall':
+    gas_dir = 'GAS/'
+    fdata = os.path.join(gas_dir, 'ethylene_CO_trainSmall_normed.npy')
+    fdata_val = os.path.join(gas_dir, 'ethylene_CO_valSmall_normed.npy')
   
   data_token += args.save_token
 
