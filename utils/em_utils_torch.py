@@ -249,26 +249,14 @@ def gaussianize_1d(X, pi, mu, sigma_sqr, datapoints=None, bandwidth=None):
     else:
       # faster 
       z = (X.unsqueeze(-1) - mu) / sigma_sqr**0.5
-      # comp = dists.Normal(mu, sigma_sqr**0.5)
-      # normal_cdfd = comp.cdf(X.unsqueeze(-1))
       comp = dists.Normal(0, 1)
       normal_cdfd = comp.cdf(z)
       normal_cdfd[normal_cdfd>1-EPS] = 1-EPS
       normal_cdfd[normal_cdfd<EPS] = EPS
       cdf = (pi.expand(len(normal_cdfd), pi.shape[0], pi.shape[1]) * normal_cdfd).sum(-1)
-      # new_distr = (pi.cpu().numpy() * cdf2).sum(-1)
       log_cdfsd = torch.log(normal_cdfd)
       log_cdf = torch.logsumexp(0.5*torch.log(2*pi) + 0.5*log_cdfsd, dim=-1)
-      # pdb.set_trace()
-      # z = z.to(device)
-      # log_cdfs2 = - F.softplus(-z)
-      # log_cdf2 = torch.logsumexp(0.5*torch.log(2*pi) + 0.5*log_cdfs2, dim=-1)
-      # print('diff - log_cdfs:', torch.norm(log_cdf - log_cdf2))
 
-      # another option: 
-      # -F.softplus(np.log(2) - x*np.sqrt(2*np.pi))
-
-      # pdb.set_trace()
     if SCIPY:
       log_sfs = to_tensor(norm.logcdf(-1*z.cpu()))
       log_sf = torch.logsumexp(0.5*torch.log(2*pi) + 0.5*log_sfs, dim=-1)
@@ -279,11 +267,7 @@ def gaussianize_1d(X, pi, mu, sigma_sqr, datapoints=None, bandwidth=None):
       normal_sf[normal_sf<EPS_CDF] = EPS_CDF
       log_sfsd = torch.log(normal_sf)
       log_sf = torch.logsumexp(0.5*torch.log(2*pi) + 0.5*log_sfsd, dim=-1)
-      # print('diff SF:', torch.norm(log_sf - log_sfd))
 
-      # # faster
-      # log_sfs = - F.softplus((X[None, ...] - mu) / sigma_sqr**0.5) - np.log(N)
-      # log_sf = torch.logsumexp(log_sfs, dim=0)
   elif False: # not used: KDE uses the routine in rbig_utils
     mask_bound = 0.5e-7
     cdf = logistic_kernel_cdf(x, datapoints, h=bandwidth)
@@ -328,15 +312,6 @@ def gaussianize_1d(X, pi, mu, sigma_sqr, datapoints=None, bandwidth=None):
     new_X = to_tensor(new_X)
   else:
     new_X = ndtri(cdf)
-
-  if False:
-    # lookup table
-    idx = new_X
-    new_X = iCDF_LOOKUP
-
-  if False and torch.norm(new_X - inverse_cdf) > 10:
-    print('Gaussianization 1D mismatch.')
-    pdb.set_trace()
 
   return new_X, cdf_mask, [log_cdf, cdf_mask_left], [log_sf, cdf_mask_right]
 
