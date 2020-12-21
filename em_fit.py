@@ -65,8 +65,8 @@ if PROFILE:
 data_dir = './datasets/'
 
 d_token = 'em{}_K{}'.format(args.n_em, args.K)
-args.save_dir = '{}/mode{}_iter{}_{}'.format(
-      args.data, args.mode, args.n_steps, d_token)
+args.save_dir = '{}/{}_mode{}_iter{}_{}'.format(
+      args.data, args.data, args.mode, args.n_steps, d_token)
 if args.n_pts:
   args.save_dir += '_nPts{}'.format(args.n_pts)
 if args.save_token:
