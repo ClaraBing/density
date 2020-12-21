@@ -58,7 +58,7 @@ SAVE_NPY = False
 VERBOSE = False
 
 TIME=args.time
-PROFILE = 1
+PROFILE = 0
 if PROFILE:
   import cProfile
   pr = cProfile.Profile()
@@ -366,6 +366,8 @@ if __name__ == '__main__':
   elif data_token == 'miniboone':
     fdata = 'miniboone/train_normed.npy'
     fdata_val = 'miniboone/val_normed.npy'
+    fdata = 'miniboone/trainval_normed.npy'
+    fdata_val = 'miniboone/test_normed.npy'
   elif data_token == 'hepmass':
     fdata = 'hepmass/train_normed.npy'
     fdata_val = 'hepmass/val_normed.npy'
