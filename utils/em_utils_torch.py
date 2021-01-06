@@ -94,7 +94,8 @@ def update_EM(X, A, pi, mu, sigma_sqr,
 
   return pi, mu, sigma_sqr, ret_time 
 
-def update_A(A_mode, X):
+def update_A(A_mode, X, ica_iters=200, ica_tol=1e-4,
+             var_lr=1e-2, var_wd=1e-4, var_patience=200):
   N, D = X.shape
 
   if A_mode == 'random':
@@ -110,7 +111,7 @@ def update_A(A_mode, X):
     SUCC_FLAG = False
     while cnt < n_tries and not SUCC_FLAG:
       try:
-        ica = FastICA()
+        ica = FastICA(max_iter=ica_iters, tol=ica_tol)
         _ = ica.fit_transform(X.cpu())
         Aorig = ica.mixing_
 
@@ -132,7 +133,7 @@ def update_A(A_mode, X):
       print('ICA failed. Use random orthonormal matrix.')
       A = to_tensor(ortho_group.rvs(D))
   elif A_mode == 'variational':
-    A = variational_KL(X, 1000).cpu()
+    A = variational_KL(X, 1000, lr=var_lr, wd=var_wd, patience=var_patience).cpu()
     _, ss, _ = np.linalg.svd(A)
     A = to_tensor(A / ss[0])
   elif A_mode == 'Wasserstein':

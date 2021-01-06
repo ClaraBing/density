@@ -23,6 +23,8 @@ parser.add_argument('--n-em', type=int, default=30)
 parser.add_argument('--n-gd', type=int, default=20)
 parser.add_argument('--mode', type=str, default='GA',
                     choices=['ICA', 'PCA', 'random', 'None', 'variational', 'Wasserstein'])
+parser.add_argument('--ica-iters', type=int, default=200)
+parser.add_argument('--ica-tol', type=float, default=1e-4)
 parser.add_argument('--g1d-first', type=int, default=0,
                     help="Whether to run a Gaussianization step before iterates. If 1, then this should be the same as RBIG.")
 parser.add_argument('--log-det-version', type=str, default='v1')
@@ -41,6 +43,11 @@ parser.add_argument('--data', type=str, default='GM', choices=[
        ])
 parser.add_argument('--pca-dim', type=int, default=0,
                    help="PCA dimension for high-dim data e.g. MNIST.")
+# variational tuning
+parser.add_argument('--var-lr', type=float, default=1e-1)
+parser.add_argument('--var-wd', type=float, default=1e-4)
+parser.add_argument('--var-patience', type=int, default=200)
+# saving & logging
 parser.add_argument('--overwrite', type=int, default=0,
                    help="Whether to overwrite an existing directory.")
 parser.add_argument('--save-token', type=str, default='')
@@ -53,7 +60,7 @@ from utils.em_utils_torch import *
 # from rbig_util import *
 
 SAVE_ROOT = 'runs_gaussianization'
-SAVE_FIG = False
+SAVE_FIG = True
 SAVE_NPY = False
 VERBOSE = False
 
@@ -151,7 +158,8 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
           '(grad {})'.format(args.grad_mode) if args.mode in ['GA', 'torchGA', 'torchAll'] else ''))
     if TIME:
       em_start = time()
-    A = update_A(A_mode, X)
+    A = update_A(A_mode, X, ica_iters=args.ica_iters, ica_tol=args.ica_tol,
+                 var_lr=args.var_lr, var_wd=args.var_wd, var_patience=args.var_patience)
     pi, mu, sigma_sqr, ret_time = update_EM(X, A, pi, mu, sigma_sqr,
               threshs[i], max_em_steps=args.n_em)
 
