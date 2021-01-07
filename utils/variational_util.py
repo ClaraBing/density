@@ -3,6 +3,9 @@ import numpy as np
 import torch.optim as optim
 import torch.nn as nn
 
+import wandb
+
+USE_WANDB = True
 DTYPE = torch.FloatTensor
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -71,7 +74,10 @@ def variational_KL(X, n_epochs, n=1000, num_hidden_nodes=10, det_lambda=0.1,
         sum_loss.backward()
         optimizer.step()
         scheduler.step(sum_loss)
-        print(i, sum_loss.item())
+        if i % 20 == 0:
+          print(i, sum_loss.item())
+          if USE_WANDB:
+            wandb.log({'var_loss': sum_loss.item()})
         with torch.no_grad():
             _, ss, _ = np.linalg.svd(A.detach().cpu())
             if ss[0] > 1:
