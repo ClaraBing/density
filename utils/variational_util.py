@@ -33,7 +33,7 @@ class variationalNet(torch.nn.Module):
     def parameter_count(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-def variational_KL(X, n_iters, n=1000, num_hidden_nodes=10, det_lambda=0.1,
+def variational_KL(X, n_iters, n=1000, num_hidden_nodes=10, det_lambda=0.1, det_every=100,
     lr=1e-2, wd=1e-4, patience=200):
     """
     Input:
@@ -68,7 +68,7 @@ def variational_KL(X, n_iters, n=1000, num_hidden_nodes=10, det_lambda=0.1,
         y_Z = torch.flatten(A.T.matmul(Z.T)).view(n*D,1)
         g_y_Z = g_function(y_Z)
         sum_loss += torch.sum(g_y_Z)/n
-        if i % 100 == 0:
+        if i % det_every == 0:
             det_lambda *= 0.5
         raw_loss = sum_loss
         reg_loss = det_lambda * torch.log(torch.abs(torch.det(A)))
