@@ -8,3 +8,4 @@ figs/
 images/
 outputs/
 runs_gaussianization/
+*.txt

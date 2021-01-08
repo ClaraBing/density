@@ -12,10 +12,10 @@ TIME=0
 # data='hepmass'
 # n_pts=100000
 
-data='GM'
-n_pts=0
+data='gas'
+n_pts=400000
 
-n_steps=100
+n_steps=50
 overwrite=1
 
 # sleep 16000

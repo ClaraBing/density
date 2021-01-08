@@ -1,18 +1,19 @@
 #!/bin/bash
 
-gpu_id=0
+gpu_id=1
 
 TIME=0
 
+n_steps=400
 data='gas'
 
 for mode in 'ICA'
 do
 for iter in 1
 do
-for K in 20
+for K in 400
 do
-for n_em in 40 80
+for n_em in 20 40 80 160
 do
 for density_type in 'GM'
 do
@@ -23,7 +24,7 @@ for log_det_version in 'v1'
 do
 for myG1D in 1
 do
-save_token='_'$mode'_'$density_type'_myG1D'$myG1D'_logDet'$log_det_version'_dev_checkG1D'
+save_token='_'$mode'_'$density_type'_myG1D'$myG1D'_logDet'$log_det_version
 save_token=$save_token'_run'$iter
 
 if [ $mode = 'ICA' ] || [ $mode = 'PCA' ]; then
@@ -36,7 +37,7 @@ CUDA_VISIBLE_DEVICES=$gpu_id python em_rbig.py \
   --mode=$mode \
   --density-type=$density_type \
   --n-anchors=$n_anchors \
-  --n-steps=100 \
+  --n-steps=$n_steps \
   --K=$K \
   --n-em=$n_em \
   --n-pts=$n_pts \
