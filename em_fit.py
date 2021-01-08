@@ -44,6 +44,7 @@ parser.add_argument('--data', type=str, default='GM', choices=[
 parser.add_argument('--pca-dim', type=int, default=0,
                    help="PCA dimension for high-dim data e.g. MNIST.")
 # variational tuning
+parser.add_argument('--var-iters', type=int, default=1000)
 parser.add_argument('--var-lr', type=float, default=1e-1)
 parser.add_argument('--var-wd', type=float, default=1e-4)
 parser.add_argument('--var-patience', type=int, default=200)
@@ -159,7 +160,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
     if TIME:
       em_start = time()
     A = update_A(A_mode, X, ica_iters=args.ica_iters, ica_tol=args.ica_tol,
-                 var_lr=args.var_lr, var_wd=args.var_wd, var_patience=args.var_patience)
+                 var_iters=args.var_iters, var_lr=args.var_lr, var_wd=args.var_wd, var_patience=args.var_patience)
     pi, mu, sigma_sqr, ret_time = update_EM(X, A, pi, mu, sigma_sqr,
               threshs[i], max_em_steps=args.n_em)
 

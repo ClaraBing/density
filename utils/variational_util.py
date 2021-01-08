@@ -33,7 +33,7 @@ class variationalNet(torch.nn.Module):
     def parameter_count(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-def variational_KL(X, n_epochs, n=1000, num_hidden_nodes=10, det_lambda=0.1,
+def variational_KL(X, n_iters, n=1000, num_hidden_nodes=10, det_lambda=0.1,
     lr=1e-2, wd=1e-4, patience=200):
     """
     Input:
@@ -56,7 +56,7 @@ def variational_KL(X, n_epochs, n=1000, num_hidden_nodes=10, det_lambda=0.1,
             ], lr=lr, weight_decay=wd, momentum=0.9)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=patience, verbose=True)
     g_function.train()
-    for i in range(n_epochs):
+    for i in range(n_iters):
         optimizer.zero_grad()
         sum_loss = to_tensor(torch.tensor(0.0)).to(device)
         # Compute first term for X
@@ -70,14 +70,19 @@ def variational_KL(X, n_epochs, n=1000, num_hidden_nodes=10, det_lambda=0.1,
         sum_loss += torch.sum(g_y_Z)/n
         if i % 100 == 0:
             det_lambda *= 0.5
-        sum_loss -= det_lambda * torch.log(torch.abs(torch.det(A)))
+        raw_loss = sum_loss
+        reg_loss = det_lambda * torch.log(torch.abs(torch.det(A)))
+        sum_loss -= reg_loss
         sum_loss.backward()
         optimizer.step()
-        scheduler.step(sum_loss)
+        scheduler.step(raw_loss)
         if i % 20 == 0:
           print(i, sum_loss.item())
           if USE_WANDB:
-            wandb.log({'var_loss': sum_loss.item()})
+            wandb.log({
+              'var_loss': sum_loss.item(),
+              'var_loss_raw': raw_loss.item(),
+              'var_reg': reg_loss.item()})
         with torch.no_grad():
             _, ss, _ = np.linalg.svd(A.detach().cpu())
             if ss[0] > 1:
