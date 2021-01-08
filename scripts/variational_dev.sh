@@ -32,9 +32,11 @@ for K in 40
 do
 for n_em in 200
 do
-for var_wd in 1e-4 1e-5 1e-3
+for var_iter in 2000
 do
-for var_lr in 0.1 0.3 1 0.03
+for var_wd in 1e-6
+do
+for var_lr in 1 
 do
 save_token='_'$mode
 if [ $g1d_first -eq 1 ]; then
@@ -44,7 +46,7 @@ else
 fi
 # save_token=$save_token'_myG1D_logDet'$log_det_version'_scipy'
 # save_token=$save_token'_myG1D_logDet'$log_det_version'_ndtri'
-save_token=$save_token'_varLR'$var_lr'_varWD'$var_wd
+save_token=$save_token'_varIter'$var_iter'_varLR'$var_lr'_varWD'$var_wd
 save_token=$save_token'_run'$iter
 
 # CUDA_VISIBLE_DEVICES=$gpu_id python -m cProfile -s cumtime em_fit.py \
@@ -59,11 +61,13 @@ CUDA_VISIBLE_DEVICES=$gpu_id python em_fit.py \
   --n-steps=$n_steps \
   --n-em=$n_em \
   --n-pts=$n_pts \
+  --var-iter=$var_iter \
   --var-lr=$var_lr \
   --var-wd=$var_wd \
   --save-token=$save_token \
   --time=$TIME \
   --overwrite=$overwrite
+done
 done
 done
 done
