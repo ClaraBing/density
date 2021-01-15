@@ -50,6 +50,7 @@ parser.add_argument('--var-wd', type=float, default=1e-4)
 parser.add_argument('--var-patience', type=int, default=200)
 parser.add_argument('--det-lambda', type=float, default=0.1)
 parser.add_argument('--det-every', type=int, default=100)
+parser.add_argument('--var-num-hidden-nodes', type=int, default=10)
 # saving & logging
 parser.add_argument('--overwrite', type=int, default=0,
                    help="Whether to overwrite an existing directory.")
@@ -163,7 +164,8 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       em_start = time()
     A = update_A(A_mode, X, ica_iters=args.ica_iters, ica_tol=args.ica_tol,
                  det_lambda=args.det_lambda, det_every=args.det_every, 
-                 var_iters=args.var_iters, var_lr=args.var_lr, var_wd=args.var_wd, var_patience=args.var_patience)
+                 var_iters=args.var_iters, var_lr=args.var_lr, var_wd=args.var_wd, var_patience=args.var_patience,
+                 var_num_hidden_nodes=args.var_num_hidden_nodes)
     pi, mu, sigma_sqr, ret_time = update_EM(X, A, pi, mu, sigma_sqr,
               threshs[i], max_em_steps=args.n_em)
 

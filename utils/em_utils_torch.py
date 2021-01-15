@@ -96,7 +96,8 @@ def update_EM(X, A, pi, mu, sigma_sqr,
 
 def update_A(A_mode, X, ica_iters=200, ica_tol=1e-4,
              det_lambda=0.1, det_every=100,
-             var_iters=1000, var_lr=1e-2, var_wd=1e-4, var_patience=200):
+             var_iters=1000, var_lr=1e-2, var_wd=1e-4, var_patience=200,
+             var_num_hidden_nodes=10):
   N, D = X.shape
 
   if A_mode == 'random':
@@ -134,7 +135,7 @@ def update_A(A_mode, X, ica_iters=200, ica_tol=1e-4,
       print('ICA failed. Use random orthonormal matrix.')
       A = to_tensor(ortho_group.rvs(D))
   elif A_mode == 'variational':
-    A = variational_KL(X, var_iters, lr=var_lr, wd=var_wd, patience=var_patience, det_lambda=det_lambda, det_every=det_every).cpu()
+    A = variational_KL(X, var_iters, lr=var_lr, wd=var_wd, patience=var_patience, det_lambda=det_lambda, det_every=det_every, num_hidden_nodes=var_num_hidden_nodes).cpu()
     _, ss, _ = np.linalg.svd(A)
     A = to_tensor(A / ss[0])
   elif A_mode == 'Wasserstein':
