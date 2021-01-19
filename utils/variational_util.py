@@ -162,29 +162,35 @@ def variational_KL(X, n_iters, n=1000, num_hidden_nodes=10, det_lambda=0.1, det_
 
 
 if __name__ == '__main__':
-  D = 2
-  mu = 4
+  import argparse
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--var-lr', type=float)
+  parser.add_argument('--var-wd', type=float)
+  parser.add_argument('--var-num-hidden-nodes', type=int)
+  parser.add_argument('--var-n-layers', type=int)
+  parser.add_argument('--pos-type', type=str)
+  parser.add_argument('--A-mode', type=str)
+  parser.add_argument('--data', type=str, default='')
+  parser.add_argument('--data-dim', type=int)
+  parser.add_argument('--data-mu', type=int)
+  parser.add_argument('--wb-name', type=str)
+ 
+  args = parser.parse_args()
+  args.data = '{}dGaussian'.format(args.data_dim)
+
+  args.wb_name = '{}d_mu{}_lr{}_wd{}_nHidden{}_nLayers{}_posType{}_A{}'.format(
+      args.data_dim, args.data_mu, args.var_lr, args.var_wd,
+      args.var_num_hidden_nodes, args.var_n_layers, args.pos_type, args.A_mode
+    )
+      
   N = 10000
-  X = np.random.normal(loc=mu, scale=1, size=(N, D))
-  n_iters=1000
+  X = np.random.normal(loc=args.data_mu, scale=1, size=(N, args.data_dim))
+  n_iters=2000
   A_mode = 'givens'
-  
-  # for wd in [1e-6, 1e-5, 1e-4]:
-  for wd in [1e-4, 1e-5, 1e-6]:
-    for lr in [0.01, 0.003, 0.001]:
-      for num_hidden_nodes in [160, 320, 640]:
-        for n_layers in [1, 2, 3]:
-          for pos_type in ['square']:
-            cfgs={'var_lr':lr, 'var_wd':wd, 'var_num_hidden_nodes':num_hidden_nodes}
-            cfgs['pos_type'] = pos_type
-            cfgs['var_n_layers'] = n_layers
-            cfgs['data'] = '1dGaussian'
-            cfgs['D'] = D
-            cfgs['data_mu'] = mu
-            cfgs['A_mode'] = A_mode
-            wandb.init(project='density', config=cfgs)
-            variational_KL(X, n_iters, n=10000, num_hidden_nodes=num_hidden_nodes,
-                           det_lambda=0.1, det_every=100, lr=lr, wd=wd, patience=200, A_mode=A_mode,
-                           n_layers=n_layers, pos_type=pos_type)
-            wandb.finish()
+
+  wandb.init(project='density', config=args, name=args.wb_name)
+  variational_KL(X, n_iters, n=10000, num_hidden_nodes=args.var_num_hidden_nodes,
+                 det_lambda=0.1, det_every=100, lr=args.var_lr, wd=args.var_wd, patience=200,
+                 A_mode=args.A_mode, n_layers=args.var_n_layers, pos_type=args.pos_type)
+  wandb.finish()
 
