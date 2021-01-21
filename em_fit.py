@@ -261,6 +261,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         'sigma_mean': sigma_mean,
         'sigma_mean_test': sigma_mean_test,
         'detA': torch.det(A).item(),
+        'num_iter': i,
         })
 
     if args.save_dir:
