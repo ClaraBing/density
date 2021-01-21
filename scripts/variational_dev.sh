@@ -13,9 +13,9 @@ TIME=0
 # n_pts=100000
 
 data='gas'
-n_pts=400000
+n_pts=10000
 
-n_steps=50
+n_steps=30
 overwrite=1
 
 # sleep 16000
@@ -38,6 +38,14 @@ for var_wd in 1e-6
 do
 for var_lr in 1 
 do
+for var_A_mode in 'givens'
+do
+for var_num_layers in 5 10
+do
+#for det_lambda in 0.005
+#do
+#for det_every in 500 1000
+#do
 save_token='_'$mode
 if [ $g1d_first -eq 1 ]; then
   save_token=$save_token'_RBIG'
@@ -66,7 +74,13 @@ CUDA_VISIBLE_DEVICES=$gpu_id python em_fit.py \
   --var-wd=$var_wd \
   --save-token=$save_token \
   --time=$TIME \
-  --overwrite=$overwrite
+  --overwrite=$overwrite \
+  --var-A-mode=$var_A_mode \
+  --var-num-layers=$var_num_layers
+  #--det-lambda=$det_lambda \
+  #--det-every=$det_every 
+done
+done
 done
 done
 done

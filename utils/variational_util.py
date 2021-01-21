@@ -224,7 +224,7 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
               G[i,i], G[j,j] = np.cos(eta), np.cos(eta)
               G[i,j], G[j,i] = -np.sin(eta), np.sin(eta)
               tmp = A.mm(G)
-              cur_loss, _, _, _, _ = helper_loss(tmp)
+              cur_loss, _, _, _, _ = helper_loss(tmp, X_batch)
               if best_loss is None or cur_loss < best_loss:
                 best_loss = cur_loss
                 best_G = G.clone()
