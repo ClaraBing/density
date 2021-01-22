@@ -34,9 +34,7 @@ class trainset(Dataset):
         return len(self.X)
 
     def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        entry = self.X[idx,:]
+        entry = self.X[idx]
         return entry
 
 class variationalNet(torch.nn.Module):
@@ -44,12 +42,15 @@ class variationalNet(torch.nn.Module):
     def __init__(self, num_hidden_nodes, n_layers=1, embed_size=1, pos_type='smoothL1'):
         super(variationalNet, self).__init__()
         
-        layers = [nn.Linear(embed_size, num_hidden_nodes)]
-        for _ in range(n_layers):
+        if n_layers == 0:
+          layers = [nn.Linear(embed_size, 1)]
+        else:
+          layers = [nn.Linear(embed_size, num_hidden_nodes)]
+          for _ in range(n_layers):
+            layers += nn.ReLU(),
+            layers += nn.Linear(num_hidden_nodes, num_hidden_nodes),
           layers += nn.ReLU(),
-          layers += nn.Linear(num_hidden_nodes, num_hidden_nodes),
-        layers += nn.ReLU(),
-        layers += nn.Linear(num_hidden_nodes, 1),
+          layers += nn.Linear(num_hidden_nodes, 1),
         self.net = nn.Sequential(*layers)
         if pos_type == 'smoothL1':
           self.make_positive = lambda x: nn.SmoothL1Loss(reduction='none')(x, torch.zeros(x.shape).to(device))
@@ -85,14 +86,13 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
     Output: 
     A: torch tensor D * D
     """
-    # X = to_tensor(X)
     N, D = X.shape
     mean = np.ones(D)
     cov = np.eye(D,D)
     Z = to_tensor(np.random.multivariate_normal(mean, cov, n_Zs))
     if var_LB == 'E1':
       embed_size = 1
-    elif var_LB == 'E2' or var_LB == 'E3':
+    elif var_LB == 'E2' or var_LB == 'E3' or var_LB == 'E4':
       embed_size = D
     g_function = variationalNet(num_hidden_nodes, n_layers=n_layers, pos_type=pos_type, embed_size=embed_size).to(device)
     params = [{'params': g_function.parameters()}]
@@ -117,25 +117,31 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       y_X = to_tensor(torch.flatten(M.T.matmul(X.T))).view(-1,1) 
       g_y_X = g_function(y_X)
       log_g_y_X = torch.log(g_y_X)
-      sum_loss -= torch.mean(log_g_y_X)
+      loss1 = torch.mean(log_g_y_X)
+      sum_loss -= loss1
       # Compute second term for Z
       y_Z = torch.flatten(M.T.matmul(Z.T)).view(-1,1)
       g_y_Z = g_function(y_Z)
-      sum_loss += torch.mean(g_y_Z)
-      return sum_loss, y_X, g_y_X, y_Z, g_y_Z
+      loss2 = torch.mean(g_y_Z)
+      sum_loss += loss2
+      return sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2 
     
     def helper_loss_E2(M, X):
       sum_loss = to_tensor(torch.tensor(0.0)).to(device)
       # Compute first term for X
       y_X = to_tensor(M.T.matmul(X.T)).T
       g_y_X = g_function(y_X)
-      sum_loss -= torch.mean(g_y_X)
+      g_y_X = torch.clamp(g_y_X, -100, 60)
+      loss1 = torch.mean(g_y_X)
+      sum_loss -= loss1
       # Compute second term for Z
       y_Z = to_tensor(M.T.matmul(Z.T)).T
       g_y_Z = g_function(y_Z)
-      out_y_Z = torch.log(torch.exp(g_y_Z).mean())
-      sum_loss += out_y_Z
-      return sum_loss, y_X, g_y_X, y_Z, g_y_Z
+      # print('mean={:.5f} / max={:.5f}'.format(g_y_Z.mean(), g_y_Z.max()))
+      g_y_Z = torch.clamp(g_y_Z, -100, 60)
+      loss2 = torch.log(torch.exp(g_y_Z).mean())
+      sum_loss += loss2
+      return sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2
 
     def helper_loss_E3(M, X):
       # same as E2, except using Taylor series to approximate exp
@@ -143,45 +149,55 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       # Compute first term for X
       y_X = to_tensor(M.T.matmul(X.T)).T
       g_y_X = g_function(y_X)
-      sum_loss -= torch.mean(g_y_X)
+      loss1 = torch.mean(g_y_X)
+      sum_loss -= loss1
       # Compute second term for Z
       y_Z = to_tensor(M.T.matmul(Z.T)).T
       g_y_Z = g_function(y_Z)
       approx_exp = 1 + g_y_Z + g_y_Z**2 / 2
       # + g_y_Z**3 / 6
-      out_y_Z = torch.log(approx_exp.mean())
-      sum_loss += out_y_Z
-      return sum_loss, y_X, g_y_X, y_Z, g_y_Z
+      loss2 = torch.log(approx_exp.mean())
+      sum_loss += loss2
+      return sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2
 
+    def helper_loss_E4(M, X):
+      """
+      Variational form
+      """
+      sum_loss = to_tensor(torch.tensor(0.0)).to(device)
+      # Compute first term for X
+      y_X = to_tensor(torch.flatten(M.T.matmul(X.T))).view(-1,1) 
+      g_y_X = g_function(y_X)
+      loss1 = torch.mean(g_y_X)
+      sum_loss -= loss1
+      # Compute second term for Z
+      y_Z = torch.flatten(M.T.matmul(Z.T)).view(-1,1)
+      g_y_Z = g_function(y_Z)
+      loss2 = torch.mean(g_y_Z)
+      sum_loss += loss2
+      return sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2 
+ 
     if var_LB == 'E1':
       helper_loss = helper_loss_E1
     elif var_LB == 'E2':
       helper_loss = helper_loss_E2
     elif var_LB == 'E3':
       helper_loss = helper_loss_E3
+    elif var_LB == 'E4':
+      helper_loss = helper_loss_E4
     train_dataset = trainset(X)
     train_loader = DataLoader(train_dataset, batch_size=batch_size,
-                             shuffle=True, num_workers=0)
+                             shuffle=True, num_workers=4)
     train_iter = iter(train_loader)
     for i in range(n_iters):
         optimizer.zero_grad()
-        # sum_loss = to_tensor(torch.tensor(0.0)).to(device)
-        # # Compute first term for X
-        # y_X = to_tensor(torch.flatten(A.T.matmul(X.T))).view(-1,1) 
-        # g_y_X = g_function(y_X)
-        # log_g_y_X = torch.log(g_y_X)
-        # sum_loss -= torch.mean(log_g_y_X)
-        # # Compute second term for Z
-        # y_Z = torch.flatten(A.T.matmul(Z.T)).view(-1,1)
-        # g_y_Z = g_function(y_Z)
-        # sum_loss += torch.mean(g_y_Z)
         try:
             X_batch = train_iter.next()
         except:
             train_iter = iter(train_loader)
             X_batch = train_iter.next()
         X_batch = to_tensor(X_batch)
-        sum_loss, y_X, g_y_X, y_Z, g_y_Z = helper_loss(A, X_batch)
+        sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2 = helper_loss(A, X_batch)
         if i % det_every == 0:
             det_lambda *= 0.5
         raw_loss = sum_loss
@@ -205,7 +221,9 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
                 'var_input_mean': y_X.mean().item(),
                 'var_input_Z_mean': y_Z.mean().item(),
                 'var_out_mean': g_y_X.mean().item(),
-                'var_out_Z_mean': g_y_Z.mean().item()})
+                'var_out_Z_mean': g_y_Z.mean().item(),
+                'var_out_term1': loss1.item(),
+                'var_out_term2': loss2.item()})
         if A_mode == 'GD':
           with torch.no_grad():
               _, ss, _ = np.linalg.svd(A.detach().cpu())
@@ -225,7 +243,7 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
               G[i,i], G[j,j] = np.cos(eta), np.cos(eta)
               G[i,j], G[j,i] = -np.sin(eta), np.sin(eta)
               tmp = A.mm(G)
-              cur_loss, _, _, _, _ = helper_loss(tmp, X_batch)
+              cur_loss, _, _, _, _, _, _ = helper_loss(tmp, X_batch)
               if best_loss is None or cur_loss < best_loss:
                 best_loss = cur_loss
                 best_G = G.clone()
