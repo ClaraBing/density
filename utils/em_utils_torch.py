@@ -98,7 +98,7 @@ def update_A(A_mode, X, ica_iters=200, ica_tol=1e-4,
              det_lambda=0.1, det_every=100,
              var_iters=1000, var_lr=1e-2, var_wd=1e-4, var_patience=200,
              var_A_mode='GD', var_pos_type='smoothL1',
-             var_num_hidden_nodes=10, var_num_layers=1):
+             var_num_hidden_nodes=10, var_num_layers=1, var_batch_size=10000):
   N, D = X.shape
 
   if A_mode == 'random':
@@ -137,7 +137,8 @@ def update_A(A_mode, X, ica_iters=200, ica_tol=1e-4,
       A = to_tensor(ortho_group.rvs(D))
   elif A_mode == 'variational':
     A = variational_KL(X, var_iters, lr=var_lr, wd=var_wd, patience=var_patience, det_lambda=det_lambda, det_every=det_every,
-                       A_mode=var_A_mode, pos_type=var_pos_type, num_hidden_nodes=var_num_hidden_nodes, n_layers=var_num_layers).cpu()
+                       A_mode=var_A_mode, pos_type=var_pos_type, num_hidden_nodes=var_num_hidden_nodes, n_layers=var_num_layers,
+                       batch_size=var_batch_size).cpu()
     _, ss, _ = np.linalg.svd(A)
     A = to_tensor(A / ss[0])
   elif A_mode == 'Wasserstein':

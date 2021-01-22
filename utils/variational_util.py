@@ -3,6 +3,7 @@ import numpy as np
 import torch.optim as optim
 import torch.nn as nn
 from scipy.stats import ortho_group
+from torch.utils.data import Dataset, DataLoader
 
 import pdb
 
@@ -18,6 +19,25 @@ def to_tensor(data):
     if not isinstance(data, torch.Tensor):
       data = torch.tensor(data)
     return data.type(DTYPE).to(device)
+
+# Data loader for the training data
+class trainset(Dataset):
+
+    def __init__(self, X):
+        """
+        Args:
+            X: training data numpy array
+        """
+        self.X = X
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        entry = self.X[idx,:]
+        return entry
 
 class variationalNet(torch.nn.Module):
 
@@ -57,7 +77,7 @@ class variationalNet(torch.nn.Module):
 
 def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, det_every=100,
     lr=1e-2, wd=1e-4, patience=200, A_mode='GD', pos_type='smoothL1', n_layers=1,
-    var_LB='E1'):
+    var_LB='E1', batch_size=10000):
     """
     Input:
     X: torch tensor N * D
@@ -65,7 +85,7 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
     Output: 
     A: torch tensor D * D
     """
-    X = to_tensor(X)
+    # X = to_tensor(X)
     N, D = X.shape
     mean = np.ones(D)
     cov = np.eye(D,D)
@@ -91,7 +111,7 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=patience, verbose=True)
     g_function.train()
 
-    def helper_loss_E1(M):
+    def helper_loss_E1(M, X):
       sum_loss = to_tensor(torch.tensor(0.0)).to(device)
       # Compute first term for X
       y_X = to_tensor(torch.flatten(M.T.matmul(X.T))).view(-1,1) 
@@ -104,7 +124,7 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       sum_loss += torch.mean(g_y_Z)
       return sum_loss, y_X, g_y_X, y_Z, g_y_Z
     
-    def helper_loss_E2(M):
+    def helper_loss_E2(M, X):
       sum_loss = to_tensor(torch.tensor(0.0)).to(device)
       # Compute first term for X
       y_X = to_tensor(M.T.matmul(X.T)).T
@@ -117,7 +137,7 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       sum_loss += out_y_Z
       return sum_loss, y_X, g_y_X, y_Z, g_y_Z
 
-    def helper_loss_E3(M):
+    def helper_loss_E3(M, X):
       # same as E2, except using Taylor series to approximate exp
       sum_loss = to_tensor(torch.tensor(0.0)).to(device)
       # Compute first term for X
@@ -139,7 +159,10 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       helper_loss = helper_loss_E2
     elif var_LB == 'E3':
       helper_loss = helper_loss_E3
-
+    train_dataset = trainset(X)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size,
+                             shuffle=True, num_workers=0)
+    train_iter = iter(train_loader)
     for i in range(n_iters):
         optimizer.zero_grad()
         # sum_loss = to_tensor(torch.tensor(0.0)).to(device)
@@ -152,7 +175,13 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
         # y_Z = torch.flatten(A.T.matmul(Z.T)).view(-1,1)
         # g_y_Z = g_function(y_Z)
         # sum_loss += torch.mean(g_y_Z)
-        sum_loss, y_X, g_y_X, y_Z, g_y_Z = helper_loss(A)
+        try:
+            X_batch = train_iter.next()
+        except:
+            train_iter = iter(train_loader)
+            X_batch = train_iter.next()
+        X_batch = to_tensor(X_batch)
+        sum_loss, y_X, g_y_X, y_Z, g_y_Z = helper_loss(A, X_batch)
         if i % det_every == 0:
             det_lambda *= 0.5
         raw_loss = sum_loss
@@ -196,7 +225,7 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
               G[i,i], G[j,j] = np.cos(eta), np.cos(eta)
               G[i,j], G[j,i] = -np.sin(eta), np.sin(eta)
               tmp = A.mm(G)
-              cur_loss, _, _, _, _ = helper_loss(tmp)
+              cur_loss, _, _, _, _ = helper_loss(tmp, X_batch)
               if best_loss is None or cur_loss < best_loss:
                 best_loss = cur_loss
                 best_G = G.clone()

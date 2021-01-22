@@ -54,6 +54,7 @@ parser.add_argument('--var-A-mode', type=str, default='GD', choices=['GD', 'fixe
 parser.add_argument('--var-pos-type', type=str, default='smoothL1')
 parser.add_argument('--var-num-hidden-nodes', type=int, default=10)
 parser.add_argument('--var-num-layers', type=int, default=1)
+parser.add_argument('--var-batch-size', type=int, default=10000)
 # saving & logging
 parser.add_argument('--overwrite', type=int, default=0,
                    help="Whether to overwrite an existing directory.")
@@ -260,6 +261,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
         'sigma_mean': sigma_mean,
         'sigma_mean_test': sigma_mean_test,
         'detA': torch.det(A).item(),
+        'num_iter': i,
         })
 
     if args.save_dir:

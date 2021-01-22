@@ -16,6 +16,7 @@ data='GM'
 n_pts=0
 
 n_steps=200
+
 overwrite=1
 
 # sleep 16000
@@ -52,6 +53,14 @@ for pos_type in 'square'
 do
 for var_A_mode in 'givens'
 do
+for var_A_mode in 'givens'
+do
+for var_num_layers in 5 10
+do
+#for det_lambda in 0.005
+#do
+#for det_every in 500 1000
+#do
 save_token='_'$mode
 if [ $g1d_first -eq 1 ]; then
   save_token=$save_token'_RBIG'
@@ -89,7 +98,13 @@ CUDA_VISIBLE_DEVICES=$gpu_id python em_fit.py \
   --var-pos-type=$pos_type \
   --save-token=$save_token \
   --time=$TIME \
-  --overwrite=$overwrite
+  --overwrite=$overwrite \
+  --var-A-mode=$var_A_mode \
+  --var-num-layers=$var_num_layers
+  #--det-lambda=$det_lambda \
+  #--det-every=$det_every 
+done
+done
 done
 done
 done
