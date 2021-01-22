@@ -127,7 +127,8 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       # Compute second term for Z
       y_Z = to_tensor(M.T.matmul(Z.T)).T
       g_y_Z = g_function(y_Z)
-      approx_exp = 1 + g_y_Z + g_y_Z**2 / 2 + g_y_Z**3 / 6
+      approx_exp = 1 + g_y_Z + g_y_Z**2 / 2
+      # + g_y_Z**3 / 6
       out_y_Z = torch.log(approx_exp.mean())
       sum_loss += out_y_Z
       return sum_loss, y_X, g_y_X, y_Z, g_y_Z
