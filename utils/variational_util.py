@@ -198,11 +198,13 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
             X_batch = train_iter.next()
         X_batch = to_tensor(X_batch)
         sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2 = helper_loss(A, X_batch)
-        if i % det_every == 0:
-            det_lambda *= 0.5
         raw_loss = sum_loss
-        reg_loss = det_lambda * torch.log(torch.abs(torch.det(A)))
-        sum_loss -= reg_loss
+        reg_loss = None
+        if A_mode != "givens":
+          if i % det_every == 0:
+              det_lambda *= 0.5
+          reg_loss = det_lambda * torch.log(torch.abs(torch.det(A)))
+          sum_loss -= reg_loss
         sum_loss.backward()
         if torch.isnan(sum_loss):
           print("Nan.")
@@ -214,7 +216,9 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
           if USE_WANDB:
             wandb.log({
               'var_loss': sum_loss.item(),
-              'var_loss_raw': raw_loss.item(),
+              'var_loss_raw': raw_loss.item()})
+            if reg_loss:
+              wandb.log({
               'var_reg': reg_loss.item()})
             if DEBUG:
               wandb.log({

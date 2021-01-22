@@ -1,19 +1,19 @@
 #!/bin/bash
 
-gpu_id=0
+gpu_id=1
 
 TIME=0
 
-# data='gas'
-# n_pts=10000
+data='gas'
+n_pts=1000
 # data='miniboone'
 # data='power'
 # n_pts=800000
 # data='hepmass'
 # n_pts=100000
 
-data='GM'
-n_pts=0
+# data='GM'
+# n_pts=0
 
 n_steps=200
 
@@ -45,17 +45,13 @@ for det_every in 200
 do
 for var_num_hidden_nodes in 160
 do
-for var_num_layers in 1
+for var_LB in 'E1'
 do
-for var_LB in 'E2'
+for pos_type in 'smoothL1'
 do
-for pos_type in 'square'
+for var_A_mode in 'GD'
 do
-for var_A_mode in 'givens'
-do
-for var_A_mode in 'givens'
-do
-for var_num_layers in 5 10
+for var_num_layers in 3 6
 do
 #for det_lambda in 0.005
 #do
@@ -99,12 +95,8 @@ CUDA_VISIBLE_DEVICES=$gpu_id python em_fit.py \
   --save-token=$save_token \
   --time=$TIME \
   --overwrite=$overwrite \
-  --var-A-mode=$var_A_mode \
-  --var-num-layers=$var_num_layers
   #--det-lambda=$det_lambda \
   #--det-every=$det_every 
-done
-done
 done
 done
 done
