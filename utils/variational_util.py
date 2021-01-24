@@ -166,12 +166,12 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       """
       sum_loss = to_tensor(torch.tensor(0.0)).to(device)
       # Compute first term for X
-      y_X = to_tensor(torch.flatten(M.T.matmul(X.T))).view(-1,1) 
+      y_X = to_tensor(M.T.matmul(X.T)).T 
       g_y_X = g_function(y_X)
       loss1 = torch.mean(g_y_X)
       sum_loss -= loss1
       # Compute second term for Z
-      y_Z = torch.flatten(M.T.matmul(Z.T)).view(-1,1)
+      y_Z = to_tensor(M.T.matmul(Z.T)).T
       g_y_Z = g_function(y_Z)
       loss2 = torch.mean(g_y_Z)
       sum_loss += loss2
@@ -187,7 +187,7 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       helper_loss = helper_loss_E4
     train_dataset = trainset(X)
     train_loader = DataLoader(train_dataset, batch_size=batch_size,
-                             shuffle=True, num_workers=4)
+                             shuffle=True, num_workers=0)
     train_iter = iter(train_loader)
     for i in range(n_iters):
         optimizer.zero_grad()
