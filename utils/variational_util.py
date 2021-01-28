@@ -60,6 +60,10 @@ class variationalNet(torch.nn.Module):
           self.make_positive = lambda x: torch.square(x)
         elif pos_type == 'exp':
           self.make_positive = lambda x: torch.exp(x)
+        elif pos_type == 'relu':
+          self.make_positive = nn.ReLU()
+        elif pos_type == 'relu6':
+          self.make_positive = nn.ReLU6()
         elif pos_type == 'none':
           self.make_positive = lambda x: x
 
