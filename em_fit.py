@@ -69,12 +69,12 @@ from utils.em_utils_torch import *
 # from rbig_util import *
 
 SAVE_ROOT = 'runs_gaussianization'
-SAVE_FIG = True
+SAVE_FIG = False
 SAVE_NPY = False
 VERBOSE = False
 
 TIME=args.time
-PROFILE = 0
+PROFILE = 1
 if PROFILE:
   import cProfile
   pr = cProfile.Profile()
@@ -249,6 +249,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
 
     if USE_WANDB:
       wandb.log({
+        'layer': i,
         'NLL': nll,
         'NLLtest': nll_test,
         'KL': kl,
