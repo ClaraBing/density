@@ -45,6 +45,7 @@ parser.add_argument('--pca-dim', type=int, default=0,
                    help="PCA dimension for high-dim data e.g. MNIST.")
 # variational tuning
 parser.add_argument('--var-iters', type=int, default=1000)
+parser.add_argument('--var-optimizer-option', type=str, default='SGD', choices=['SGD', 'Adam'])
 parser.add_argument('--var-lr', type=float, default=1e-1)
 parser.add_argument('--var-wd', type=float, default=1e-4)
 parser.add_argument('--var-patience', type=int, default=200)
@@ -56,6 +57,13 @@ parser.add_argument('--var-pos-type', type=str, default='smoothL1')
 parser.add_argument('--var-num-hidden-nodes', type=int, default=10)
 parser.add_argument('--var-num-layers', type=int, default=1)
 parser.add_argument('--var-batch-size', type=int, default=10000)
+parser.add_argument('--var-n-Zs', type=int, default=5000,
+                    help="Number of Zs (std Gaussian) samples used in each layer.")
+parser.add_argument('--var-function-option', type=str, default='net', choices=['net', 'basis'])
+parser.add_argument('--var-n-cos', type=int, default=50,
+                    help="Number of cos basis func; applicable when function_option = 'basis' ")
+parser.add_argument('--var-n-sin', type=int, default=50,
+                    help="Number of sin basis func; applicable when function_option = 'basis' ")
 # saving & logging
 parser.add_argument('--overwrite', type=int, default=0,
                    help="Whether to overwrite an existing directory.")
@@ -69,7 +77,7 @@ from utils.em_utils_torch import *
 # from rbig_util import *
 
 SAVE_ROOT = 'runs_gaussianization'
-SAVE_FIG = False
+SAVE_FIG = True
 SAVE_NPY = False
 VERBOSE = False
 
@@ -167,10 +175,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
           '(grad {})'.format(args.grad_mode) if args.mode in ['GA', 'torchGA', 'torchAll'] else ''))
     if TIME:
       em_start = time()
-    A = update_A(A_mode, X, ica_iters=args.ica_iters, ica_tol=args.ica_tol,
-                 det_lambda=args.det_lambda, det_every=args.det_every, 
-                 var_iters=args.var_iters, var_lr=args.var_lr, var_wd=args.var_wd, var_patience=args.var_patience,
-                 var_LB=args.var_LB, var_A_mode=args.var_A_mode, var_pos_type=args.var_pos_type, var_num_hidden_nodes=args.var_num_hidden_nodes, var_num_layers=args.var_num_layers)
+    A = update_A(X, args)
     pi, mu, sigma_sqr, ret_time = update_EM(X, A, pi, mu, sigma_sqr,
               threshs[i], max_em_steps=args.n_em)
 
@@ -306,6 +311,12 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
       print('NLL  : {:.4e}'.format(np.array(avg_time['KL']).mean()))
       print('Save: {:.4e}'.format(np.array(avg_time['save']).mean() if avg_time['save'] else 0))
       print()
+
+    if PROFILE:
+      # TODO: delete the tmp file at the end; check the end file is correct first.
+      print_profile_stats(pr, 'profile_{}_tmp.txt'.format(args.save_token))
+
+
   if TIME:
     ftime = os.path.join(args.save_dir, 'time.pkl')
     with open(ftime, 'wb') as handle:

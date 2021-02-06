@@ -83,13 +83,13 @@ class variationalNet(torch.nn.Module):
 
 class basis_function_Net(torch.nn.Module):
 
-    def __init__(self, n_cos, n_sin, b_a, pos_type='smoothL1'):
+    def __init__(self, n_cos, n_sin, dim, pos_type='none'):
         super(basis_function_Net, self).__init__()
         
-        self.coef = torch.randn(1+n_cos+n_sin, requires_grad=True).to(device)
+        self.coef = torch.randn(1+n_cos+n_sin, dim, requires_grad=True).to(device)
         self.n_cos = n_cos
         self.n_sin = n_sin
-        self.b_a = b_a
+        self.b_a = 0
         self.pi = torch.Tensor([math.pi]).to(device)
         if pos_type == 'smoothL1':
           self.make_positive = lambda x: nn.SmoothL1Loss(reduction='none')(x, torch.zeros(x.shape).to(device))
@@ -106,21 +106,31 @@ class basis_function_Net(torch.nn.Module):
         elif pos_type == 'none':
           self.make_positive = lambda x: x
 
-    def forward(self, x):
+    def forward(self, x, x_cos=None, x_sin=None):
         out = torch.zeros(x.shape).to(device) + self.coef[0]
         for m in range(self.n_cos):
+          if not x_cos:
             out += self.coef[1+m] * torch.cos(2*self.pi*m*x/self.b_a)
+          else:
+            out += self.coef[1+m] * x_cos[:, m]
         for n in range(self.n_sin):
+          if not x_sin:
             out += self.coef[1+self.n_cos+n] * torch.sin(2*self.pi*n*x/self.b_a)
+          else:
+            out += self.coef[1+self.n_cos+n] * x_sin[:, n]
         out = self.make_positive(out)
         return out
 
     def parameter_count(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+    
+    def update_b_a(self, X, A):
+        AX = to_tensor(torch.flatten(A.T.matmul(to_tensor(X).T))).view(-1,1)
+        minimum = torch.min(AX)
+        maximum = torch.max(AX)
+        self.b_a = to_tensor(maximum-minimum)
 
-def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, det_every=100,
-    lr=1e-2, wd=1e-4, patience=200, A_mode='GD', pos_type='smoothL1', n_layers=1,
-    var_LB='E1', batch_size=10000, optimizer_option="Adam", function_option="basis"):
+def variational_KL(X, args):
     """
     Input:
     X: torch tensor N * D
@@ -128,6 +138,13 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
     Output: 
     A: torch tensor D * D
     """
+    det_lambda, det_every = args.det_lambda, args.det_every
+    var_LB = args.var_LB
+    A_mode = args.var_A_mode
+    function_option = args.var_function_option
+    optimizer_option = args.var_optimizer_option
+    n_Zs = args.var_n_Zs
+
     N, D = X.shape
     mean = np.ones(D)
     cov = np.eye(D,D)
@@ -149,31 +166,32 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
     else:
       raise NotImplementedError("A_mode should be in ['GD', 'fixed', 'givens'].\n Got {}".format(A_mode))
     if function_option == "net":
-        g_function = variationalNet(num_hidden_nodes, n_layers=n_layers, pos_type=pos_type, embed_size=embed_size).to(device)
+        g_function = variationalNet(args.var_num_hidden_nodes, n_layers=args.var_num_layers, pos_type=args.var_pos_type, embed_size=embed_size).to(device)
     elif function_option == "basis":
-        AX = to_tensor(torch.flatten(A.T.matmul(to_tensor(X).T))).view(-1,1)
-        minimum = torch.min(AX)
-        maximum = torch.max(AX)
-        b_a = to_tensor(maximum-minimum)
-        g_function = basis_function_Net(n_cos=50, n_sin=50, b_a=b_a, pos_type=pos_type).to(device)
+        g_function = basis_function_Net(n_cos=args.var_n_cos, n_sin=args.var_n_sin, dim=D, pos_type=args.var_pos_type).to(device)
+        g_function.update_b_a(X, A)
         print("Number of parameters: {}".format(g_function.parameter_count()))
     else:
         raise NotImplementedError("function_option should be in ['net', 'basis'].\n Got {}".format(g_function))
     params += [{'params': g_function.parameters()}]
     if optimizer_option == "SGD":
-        optimizer = optim.SGD(params, lr=lr, weight_decay=wd, momentum=0.9)
+        optimizer = optim.SGD(params, lr=args.var_lr, weight_decay=args.var_wd, momentum=0.9)
     elif optimizer_option == "Adam":
-        optimizer = optim.Adam(params, lr=lr, weight_decay=wd)
+        optimizer = optim.Adam(params, lr=args.var_lr, weight_decay=args.var_wd)
     else:
         raise NotImplementedError("optimizer_option should be in ['SGD', 'Adam'].\n Got {}".format(optimizer_option))
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=patience, verbose=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=args.var_patience, verbose=True)
     g_function.train()
 
-    def helper_loss_E1(M, X):
+    def helper_loss_E1(M, X, y_X=None, y_cos=None, y_sin=None):
       sum_loss = to_tensor(torch.tensor(0.0)).to(device)
       # Compute first term for X
-      y_X = to_tensor(torch.flatten(M.T.matmul(X.T))).view(-1,1) 
-      g_y_X = g_function(y_X)
+      if not y_X:
+        y_X = to_tensor(torch.flatten(M.T.matmul(X.T))).view(-1,1) 
+      if y_cos:
+        g_y_X = g_function(y_X, y_cos, y_sin)
+      else:
+        g_y_X = g_function(y_X)
       log_g_y_X = torch.log(g_y_X)
       loss1 = torch.mean(log_g_y_X)
       sum_loss -= loss1
@@ -184,11 +202,15 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       sum_loss += loss2
       return sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2 
     
-    def helper_loss_E2(M, X):
+    def helper_loss_E2(M, X, y_X=None, y_cos=None, y_sin=None):
       sum_loss = to_tensor(torch.tensor(0.0)).to(device)
       # Compute first term for X
-      y_X = to_tensor(M.T.matmul(X.T)).T
-      g_y_X = g_function(y_X)
+      if not y:
+        y_X = to_tensor(M.T.matmul(X.T)).T
+      if function_option == 'basis':
+        g_y_X = g_function(y_X, y_cos, y_sin)
+      else:
+        g_y_X = g_function(y_X)
       g_y_X = torch.clamp(g_y_X, -100, 60)
       loss1 = torch.mean(g_y_X)
       sum_loss -= loss1
@@ -201,13 +223,17 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       sum_loss += loss2
       return sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2
 
-    def helper_loss_E3(M, X):
+    def helper_loss_E3(M, X, y_X=None, y_cos=None, y_sin=None):
       # same as E2, except using Taylor series to approximate exp
       sum_loss = to_tensor(torch.tensor(0.0)).to(device)
       # Compute first term for X
-      y_X = to_tensor(M.T.matmul(X.T)).T
-      g_y_X = g_function(y_X)
-      loss1 = torch.mean(g_y_X)
+      if not y:
+        y_X = to_tensor(M.T.matmul(X.T)).T
+      if function_option == 'basis':
+        g_y_X = g_function(y_X, y_cos, y_sin)
+      else:
+        g_y_X = g_function(y_X)
+      loss1 = torch.mean(g_Y)
       sum_loss -= loss1
       # Compute second term for Z
       y_Z = to_tensor(M.T.matmul(Z.T)).T
@@ -218,14 +244,18 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       sum_loss += loss2
       return sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2
 
-    def helper_loss_E4(M, X):
+    def helper_loss_E4(M, X, y_X=None, y_cos=None, y_sin=None):
       """
       Variational form
       """
       sum_loss = to_tensor(torch.tensor(0.0)).to(device)
       # Compute first term for X
-      y_X = to_tensor(M.T.matmul(X.T)).T 
-      g_y_X = g_function(y_X)
+      if not y_X:
+        y_X = to_tensor(M.T.matmul(X.T)).T
+      if function_option == 'basis':
+        g_y_X = g_function(y_X, y_cos, y_sin)
+      else:
+        g_y_X = g_function(y_X)
       loss1 = torch.mean(g_y_X)
       sum_loss -= loss1
       # Compute second term for Z
@@ -243,11 +273,12 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       helper_loss = helper_loss_E3
     elif var_LB == 'E4':
       helper_loss = helper_loss_E4
+
     train_dataset = trainset(X)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size,
+    train_loader = DataLoader(train_dataset, batch_size=args.var_batch_size,
                              shuffle=True, num_workers=0)
     train_iter = iter(train_loader)
-    for i in range(n_iters):
+    for i in range(args.var_iters):
         optimizer.zero_grad()
         try:
             X_batch = train_iter.next()
@@ -255,7 +286,20 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
             train_iter = iter(train_loader)
             X_batch = train_iter.next()
         X_batch = to_tensor(X_batch)
+
+        # if function_option == 'basis':
+        #   # NOTE: work for 2d data only
+        #   y_X = to_tensor(A.T.matmul(X_batch.T))
+        #   tmp = y_X.unsqueeze(1).expand(1, n_cos, 1)
+        #   scaling = torch.range(0, n_cos-1).unsqueeze(0).unsqueeze(-1)
+        #   scaled = scaling * tmp
+        #   y_cos = torch.cos(2 * torch.pi * scaled / g_function.b_a)
+        #   y_sin = torch.sin(2 * torch.pi * scaled / g_function.b_a)
+
+        #   sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2 = helper_loss(A, X_batch, y_X=y_X, y_cos=y_cos, y_sin=y_sin)
+        # else:
         sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2 = helper_loss(A, X_batch)
+
         raw_loss = sum_loss
         reg_loss = None
         if A_mode != "givens":

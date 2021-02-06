@@ -94,13 +94,10 @@ def update_EM(X, A, pi, mu, sigma_sqr,
 
   return pi, mu, sigma_sqr, ret_time 
 
-def update_A(A_mode, X, ica_iters=200, ica_tol=1e-4,
-             det_lambda=0.1, det_every=100,
-             var_iters=1000, var_lr=1e-2, var_wd=1e-4, var_patience=200,
-             var_LB='E1', var_A_mode='GD', var_pos_type='smoothL1',
-             var_num_hidden_nodes=10, var_num_layers=1, var_batch_size=10000):
+def update_A(X, args):
   N, D = X.shape
 
+  A_mode = args.mode
   if A_mode == 'random':
     A = ortho_group.rvs(D)
     A = to_tensor(A)
@@ -114,7 +111,7 @@ def update_A(A_mode, X, ica_iters=200, ica_tol=1e-4,
     SUCC_FLAG = False
     while cnt < n_tries and not SUCC_FLAG:
       try:
-        ica = FastICA(max_iter=ica_iters, tol=ica_tol)
+        ica = FastICA(max_iter=args.ica_iters, tol=args.ica_tol)
         _ = ica.fit_transform(X.cpu())
         Aorig = ica.mixing_
 
@@ -136,9 +133,7 @@ def update_A(A_mode, X, ica_iters=200, ica_tol=1e-4,
       print('ICA failed. Use random orthonormal matrix.')
       A = to_tensor(ortho_group.rvs(D))
   elif A_mode == 'variational':
-    A = variational_KL(X, var_iters, lr=var_lr, wd=var_wd, patience=var_patience, det_lambda=det_lambda, det_every=det_every,
-                       var_LB=var_LB, A_mode=var_A_mode, pos_type=var_pos_type, num_hidden_nodes=var_num_hidden_nodes, n_layers=var_num_layers,
-                       batch_size=var_batch_size).cpu()
+    A = variational_KL(X, args).cpu()
     _, ss, _ = np.linalg.svd(A)
     A = to_tensor(A / ss[0])
   elif A_mode == 'Wasserstein':
