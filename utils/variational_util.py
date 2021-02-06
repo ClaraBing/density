@@ -4,6 +4,7 @@ import torch.optim as optim
 import torch.nn as nn
 from scipy.stats import ortho_group
 from torch.utils.data import Dataset, DataLoader
+import math
 
 import pdb
 
@@ -80,9 +81,46 @@ class variationalNet(torch.nn.Module):
     def parameter_count(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
+class basis_function_Net(torch.nn.Module):
+
+    def __init__(self, n_cos, n_sin, b_a, pos_type='smoothL1'):
+        super(basis_function_Net, self).__init__()
+        
+        self.coef = torch.randn(1+n_cos+n_sin, requires_grad=True).to(device)
+        self.n_cos = n_cos
+        self.n_sin = n_sin
+        self.b_a = b_a
+        self.pi = torch.Tensor([math.pi]).to(device)
+        if pos_type == 'smoothL1':
+          self.make_positive = lambda x: nn.SmoothL1Loss(reduction='none')(x, torch.zeros(x.shape).to(device))
+        elif pos_type == 'sigmoid':
+          self.make_positive = nn.Sigmoid()
+        elif pos_type == 'square':
+          self.make_positive = lambda x: torch.square(x)
+        elif pos_type == 'exp':
+          self.make_positive = lambda x: torch.exp(x)
+        elif pos_type == 'relu':
+          self.make_positive = nn.ReLU()
+        elif pos_type == 'relu6':
+          self.make_positive = nn.ReLU6()
+        elif pos_type == 'none':
+          self.make_positive = lambda x: x
+
+    def forward(self, x):
+        out = torch.zeros(x.shape).to(device) + self.coef[0]
+        for m in range(self.n_cos):
+            out += self.coef[1+m] * torch.cos(2*self.pi*m*x/self.b_a)
+        for n in range(self.n_sin):
+            out += self.coef[1+self.n_cos+n] * torch.sin(2*self.pi*n*x/self.b_a)
+        out = self.make_positive(out)
+        return out
+
+    def parameter_count(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
 def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, det_every=100,
     lr=1e-2, wd=1e-4, patience=200, A_mode='GD', pos_type='smoothL1', n_layers=1,
-    var_LB='E1', batch_size=10000):
+    var_LB='E1', batch_size=10000, optimizer_option="Adam", function_option="basis"):
     """
     Input:
     X: torch tensor N * D
@@ -98,8 +136,7 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       embed_size = 1
     elif var_LB == 'E2' or var_LB == 'E3' or var_LB == 'E4':
       embed_size = D
-    g_function = variationalNet(num_hidden_nodes, n_layers=n_layers, pos_type=pos_type, embed_size=embed_size).to(device)
-    params = [{'params': g_function.parameters()}]
+    params = []
     if A_mode == 'fixed':
       A = to_tensor(np.eye(D))
     elif A_mode == 'givens':
@@ -111,7 +148,24 @@ def variational_KL(X, n_iters, n_Zs=1000, num_hidden_nodes=10, det_lambda=0.1, d
       params += {'params': A},
     else:
       raise NotImplementedError("A_mode should be in ['GD', 'fixed', 'givens'].\n Got {}".format(A_mode))
-    optimizer = optim.SGD(params, lr=lr, weight_decay=wd, momentum=0.9)
+    if function_option == "net":
+        g_function = variationalNet(num_hidden_nodes, n_layers=n_layers, pos_type=pos_type, embed_size=embed_size).to(device)
+    elif function_option == "basis":
+        AX = to_tensor(torch.flatten(A.T.matmul(to_tensor(X).T))).view(-1,1)
+        minimum = torch.min(AX)
+        maximum = torch.max(AX)
+        b_a = to_tensor(maximum-minimum)
+        g_function = basis_function_Net(n_cos=50, n_sin=50, b_a=b_a, pos_type=pos_type).to(device)
+        print("Number of parameters: {}".format(g_function.parameter_count()))
+    else:
+        raise NotImplementedError("function_option should be in ['net', 'basis'].\n Got {}".format(g_function))
+    params += [{'params': g_function.parameters()}]
+    if optimizer_option == "SGD":
+        optimizer = optim.SGD(params, lr=lr, weight_decay=wd, momentum=0.9)
+    elif optimizer_option == "Adam":
+        optimizer = optim.Adam(params, lr=lr, weight_decay=wd)
+    else:
+        raise NotImplementedError("optimizer_option should be in ['SGD', 'Adam'].\n Got {}".format(optimizer_option))
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=patience, verbose=True)
     g_function.train()
 
