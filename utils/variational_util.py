@@ -86,7 +86,7 @@ class basis_function_Net(torch.nn.Module):
     def __init__(self, n_cos, n_sin, dim, pos_type='none'):
         super(basis_function_Net, self).__init__()
         
-        self.coef = torch.randn(1+n_cos+n_sin, dim, requires_grad=True).to(device)
+        self.coef = nn.parameter.Parameter(torch.randn(1+n_cos+n_sin, dim).to(device), requires_grad=True)
         self.n_cos = n_cos
         self.n_sin = n_sin
         self.b_a = 0
@@ -124,13 +124,16 @@ class basis_function_Net(torch.nn.Module):
     def parameter_count(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
     
-    def update_b_a(self, X, A):
-        AX = to_tensor(torch.flatten(A.T.matmul(to_tensor(X).T))).view(-1,1)
-        minimum = torch.min(AX)
-        maximum = torch.max(AX)
-        self.b_a = to_tensor(maximum-minimum)
+    def update_b_a(self, X=None, A=None, b_a=0):
+        if b_a:
+          self.b_a = b_a
+        else:
+          AX = to_tensor(torch.flatten(A.T.matmul(to_tensor(X).T))).view(-1,1)
+          minimum = torch.min(AX)
+          maximum = torch.max(AX)
+          self.b_a = to_tensor(maximum-minimum)
 
-def variational_KL(X, args):
+def variational_KL(X, args, b_a=0):
     """
     Input:
     X: torch tensor N * D
@@ -146,7 +149,7 @@ def variational_KL(X, args):
     n_Zs = args.var_n_Zs
 
     N, D = X.shape
-    mean = np.ones(D)
+    mean = np.zeros(D)
     cov = np.eye(D,D)
     Z = to_tensor(np.random.multivariate_normal(mean, cov, n_Zs))
     if var_LB == 'E1':
@@ -169,7 +172,10 @@ def variational_KL(X, args):
         g_function = variationalNet(args.var_num_hidden_nodes, n_layers=args.var_num_layers, pos_type=args.var_pos_type, embed_size=embed_size).to(device)
     elif function_option == "basis":
         g_function = basis_function_Net(n_cos=args.var_n_cos, n_sin=args.var_n_sin, dim=D, pos_type=args.var_pos_type).to(device)
-        g_function.update_b_a(X, A)
+        if b_a:
+          g_function.update_b_a(b_a=b_a)
+        else:
+          g_function.update_b_a(X=X, A=A)
         print("Number of parameters: {}".format(g_function.parameter_count()))
     else:
         raise NotImplementedError("function_option should be in ['net', 'basis'].\n Got {}".format(g_function))
@@ -350,6 +356,7 @@ def variational_KL(X, args):
               G[i,j], G[j,i] = -np.sin(eta), np.sin(eta)
               tmp = A.mm(G)
               cur_loss, _, _, _, _, _, _ = helper_loss(tmp, X_batch)
+              print(g_function.coef[0])
               if best_loss is None or cur_loss < best_loss:
                 best_loss = cur_loss
                 best_G = G.clone()
