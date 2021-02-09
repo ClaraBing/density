@@ -94,7 +94,7 @@ def update_EM(X, A, pi, mu, sigma_sqr,
 
   return pi, mu, sigma_sqr, ret_time 
 
-def update_A(X, args):
+def update_A(X, args, b_a=0):
   N, D = X.shape
 
   A_mode = args.mode
@@ -133,7 +133,7 @@ def update_A(X, args):
       print('ICA failed. Use random orthonormal matrix.')
       A = to_tensor(ortho_group.rvs(D))
   elif A_mode == 'variational':
-    A = variational_KL(X, args).cpu()
+    A = variational_KL(X, args, b_a=b_a).cpu()
     _, ss, _ = np.linalg.svd(A)
     A = to_tensor(A / ss[0])
   elif A_mode == 'Wasserstein':

@@ -356,7 +356,6 @@ def variational_KL(X, args, b_a=0):
               G[i,j], G[j,i] = -np.sin(eta), np.sin(eta)
               tmp = A.mm(G)
               cur_loss, _, _, _, _, _, _ = helper_loss(tmp, X_batch)
-              print(g_function.coef[0])
               if best_loss is None or cur_loss < best_loss:
                 best_loss = cur_loss
                 best_G = G.clone()
