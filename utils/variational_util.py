@@ -349,7 +349,8 @@ def variational_KL(X, args, b_a=0):
             if j < i: i,j = j, i
             # TODO: find step size
             best_loss, best_G = None, None
-            for eta in np.arange(-np.pi, np.pi, 20):
+            etas = np.random.uniform(-np.pi, np.pi, 20)
+            for eta in etas:
               # Givens matrix
               G = to_tensor(np.eye(D))
               G[i,i], G[j,j] = np.cos(eta), np.cos(eta)
@@ -359,6 +360,7 @@ def variational_KL(X, args, b_a=0):
               if best_loss is None or cur_loss < best_loss:
                 best_loss = cur_loss
                 best_G = G.clone()
+            # an update step of A
             A = A.mm(best_G)
     return A.detach()
 
