@@ -107,7 +107,6 @@ class basis_function_Net(torch.nn.Module):
           self.make_positive = lambda x: x
 
     def forward(self, x, x_cos=None, x_sin=None):
-        out = torch.zeros(x.shape).to(device) + self.coef[0]
         tmp = x.unsqueeze(1).repeat(1, self.n_cos, 1)
         # assume using the same number of cos and sin
         scaling = torch.arange(1, self.n_cos+1, 1).unsqueeze(0).unsqueeze(-1).to(device)
