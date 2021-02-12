@@ -106,18 +106,37 @@ class basis_function_Net(torch.nn.Module):
         elif pos_type == 'none':
           self.make_positive = lambda x: x
 
-    def forward(self, x, x_cos=None, x_sin=None):
+    def forward(self, x, option):
+      if option == 1:
+        return self.forward1(x)
+      elif option == 2:
+        return self.forward2(x)
+
+    def forward1(self, x, x_cos=None, x_sin=None):
         out = torch.zeros(x.shape).to(device) + self.coef[0]
-        for m in range(self.n_cos):
+        for m in range(1,self.n_cos+1):
           if not x_cos:
-            out += self.coef[1+m] * torch.cos(2*self.pi*m*x/self.b_a)
+            out += self.coef[m] * torch.cos(2*self.pi*m*x/self.b_a)
           else:
-            out += self.coef[1+m] * x_cos[:, m]
-        for n in range(self.n_sin):
+            out += self.coef[m] * x_cos[:, m]
+        for n in range(1, self.n_sin+1):
           if not x_sin:
-            out += self.coef[1+self.n_cos+n] * torch.sin(2*self.pi*n*x/self.b_a)
+            out += self.coef[self.n_cos+n] * torch.sin(2*self.pi*n*x/self.b_a)
           else:
-            out += self.coef[1+self.n_cos+n] * x_sin[:, n]
+            out += self.coef[self.n_cos+n] * x_sin[:, n]
+        out = self.make_positive(out)
+        return out
+
+    def forward2(self, x, x_cos=None, x_sin=None):
+        out = torch.zeros(x.shape).to(device) + self.coef[0]
+        tmp = x.unsqueeze(1).repeat(1, self.n_cos, 1)
+        # assume using the same number of cos and sin
+        scaling = torch.arange(1, self.n_cos+1, 1).unsqueeze(0).unsqueeze(-1).to(device)
+        scaled = scaling * tmp
+        y_cos = torch.cos(2 * np.pi * scaled / self.b_a)
+        y_sin = torch.sin(2 * np.pi * scaled / self.b_a)
+        prod = self.coef[1:] * torch.cat([y_cos, y_sin], 1)
+        out = prod.sum(1) + self.coef[0]
         out = self.make_positive(out)
         return out
 
@@ -259,14 +278,18 @@ def variational_KL(X, args, b_a=0):
       if not y_X:
         y_X = to_tensor(M.T.matmul(X.T)).T
       if function_option == 'basis':
-        g_y_X = g_function(y_X, y_cos, y_sin)
+        # g_y_X = g_function(y_X, y_cos, y_sin)
+        g_y_X = g_function(y_X, 1)
+        g_y_X2 = g_function(y_X, 2)
+        pdb.set_trace()
       else:
         g_y_X = g_function(y_X)
       loss1 = torch.mean(g_y_X)
       sum_loss -= loss1
       # Compute second term for Z
       y_Z = to_tensor(M.T.matmul(Z.T)).T
-      g_y_Z = g_function(y_Z)
+      g_y_Z = g_function(y_Z, 1)
+      g_y_Z2 = g_function(y_Z, 2)
       loss2 = torch.mean(g_y_Z)
       sum_loss += loss2
       return sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2 
