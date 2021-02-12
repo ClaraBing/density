@@ -264,8 +264,7 @@ def variational_KL(X, args, b_a=0):
       sum_loss -= loss1
       # Compute second term for Z
       y_Z = to_tensor(M.T.matmul(Z.T)).T
-      g_y_Z = g_function(y_Z, 1)
-      g_y_Z2 = g_function(y_Z, 2)
+      g_y_Z = g_function(y_Z)
       loss2 = torch.mean(g_y_Z)
       sum_loss += loss2
       return sum_loss, y_X, g_y_X, y_Z, g_y_Z, loss1, loss2 
@@ -342,13 +341,13 @@ def variational_KL(X, args, b_a=0):
                   A /= ss[0]
         elif A_mode == 'givens':
           # alg 1 from https://arxiv.org/pdf/1312.0624.pdf
-          n_A_iters = D**2
+          n_A_iters = min(5, int(D**2))
           for _ in range(n_A_iters):
             i, j = np.random.choice(range(D), 2, replace=False)
             if j < i: i,j = j, i
             # TODO: find step size
             best_loss, best_G = None, None
-            etas = np.random.uniform(-np.pi, np.pi, 20)
+            etas = np.random.uniform(-np.pi, np.pi, 10)
             for eta in etas:
               # Givens matrix
               G = to_tensor(np.eye(D))
