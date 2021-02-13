@@ -121,7 +121,7 @@ if args.log_det_version == 'v1':
 else:
   compute_log_det = compute_log_det_v2
 
-def fit(X, Xtest, mu_low, mu_up, data_token=''):
+def fit(X, Xtest, mu_low, mu_up, data_token='', b_a=0):
   x = X
   if SAVE_FIG:
     fimg = 'figs/hist2d_{}_init.png'.format(data_token)
@@ -175,7 +175,7 @@ def fit(X, Xtest, mu_low, mu_up, data_token=''):
           '(grad {})'.format(args.grad_mode) if args.mode in ['GA', 'torchGA', 'torchAll'] else ''))
     if TIME:
       em_start = time()
-    A = update_A(X, args)
+    A = update_A(X, args, b_a)
     pi, mu, sigma_sqr, ret_time = update_EM(X, A, pi, mu, sigma_sqr,
               threshs[i], max_em_steps=args.n_em)
 
@@ -430,6 +430,7 @@ if __name__ == '__main__':
   Xtest = np.load(os.path.join(data_dir, fdata_val))
   # zero-centered
   X = X - X.mean(0)
+  b_a = X.max() - X.min()
   Xtest = Xtest - X.mean(0)
 
   if X.ndim > 2: # images
@@ -438,5 +439,5 @@ if __name__ == '__main__':
   if args.n_pts:
     X = X[:args.n_pts]
     Xtest = Xtest[:args.n_pts//2]
-  fit(X, Xtest, mu_low, mu_up, data_token)
+  fit(X, Xtest, mu_low, mu_up, data_token, b_a=b_a)
   
